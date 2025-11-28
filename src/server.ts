@@ -6,12 +6,26 @@ import servicesRoutes from './routes/serviceRoutes'
 import professionalRoutes from './routes/professionalRoutes'
 import clientRoutes from './routes/clientRoutes';
 import appointmentRoutes from './routes/appointmentRoutes'
-
+import cors from 'cors';
+import bodyParser from 'body-parser';
 
 dotenv.config()
 
 connectDB()
 const app = express()
+
+
+
+app.use(cors({
+    origin: ['http://localhost:5173'], 
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+    allowedHeaders: ['Content-Type', 'Authorization'],
+    credentials: false
+}));
+
+app.use(express.json());
+app.use(bodyParser.json());
+
 
 app.use(express.json())
 
