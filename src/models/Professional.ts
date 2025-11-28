@@ -18,10 +18,11 @@ export interface IProfessional extends Document {
   email?: string;
   phone?: string;
   services: Types.ObjectId[];
-  color?: string; 
+  color?: string;
   workingHours: IWorkingHours[];
   timeOff: ITimeOff[];
   isActive: boolean;
+  allowOverlap: boolean; 
 }
 
 const workingHoursSchema = new Schema<IWorkingHours>(
@@ -53,6 +54,7 @@ const professionalSchema = new Schema<IProfessional>(
     workingHours: { type: [workingHoursSchema], default: [] },
     timeOff: { type: [timeOffSchema], default: [] },
     isActive: { type: Boolean, default: true },
+    allowOverlap: { type: Boolean, default: false }
   },
   { timestamps: true }
 );

@@ -25,7 +25,7 @@ const appointmentSchema = new Schema<IAppointment>(
     professional: {
       type: Schema.Types.ObjectId,
       ref: 'Professional',
-      required: true,
+      required: true
     },
     client: { type: Schema.Types.ObjectId, ref: 'Client', required: true },
     start: { type: Date, required: true },
@@ -33,10 +33,10 @@ const appointmentSchema = new Schema<IAppointment>(
     status: {
       type: String,
       enum: ['pending', 'confirmed', 'cancelled', 'completed'],
-      default: 'pending',
+      default: 'confirmed'
     },
     notes: { type: String, trim: true },
-    source: { type: String, enum: ['manual', 'online'], default: 'manual' },
+    source: { type: String, enum: ['manual', 'online'], default: 'manual' }
   },
   { timestamps: true }
 );
