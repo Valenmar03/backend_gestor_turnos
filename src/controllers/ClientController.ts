@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { Client } from '../models/Client';
 import { Business } from '../models/Business';
+import { Appointment } from '../models/Appointment';
 
 export class ClientController {
   // GET /api/clients?businessId=xxx
@@ -157,9 +158,9 @@ export class ClientController {
   // DELETE /api/clients/:id
   static async deleteClient(req: Request, res: Response) {
     try {
-      // por ahora borrado físico; más adelante podés cambiar a isActive=false
-      const client = await Client.findByIdAndDelete(req.params.id);
+      const { id } = req.params;
 
+      const client = await Client.findById(id);
       if (!client) {
         return res.status(404).json({
           ok: false,
@@ -167,9 +168,14 @@ export class ClientController {
         });
       }
 
-      return res.json({
+      // opcional: validar business
+
+      await Appointment.deleteMany({ client: id });
+      await client.deleteOne();
+
+      return res.status(200).json({
         ok: true,
-        msg: 'Cliente eliminado'
+        msg: 'Cliente y turnos asociados eliminados correctamente'
       });
     } catch (error) {
       console.error(error);

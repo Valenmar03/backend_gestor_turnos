@@ -1,6 +1,7 @@
 import type { Request, Response } from 'express';
 import { Professional } from '../models/Professional';
 import { Service } from '../models/Service';
+import { Appointment } from '../models/Appointment';
 
 export class ProfessionalController {
 
@@ -155,15 +156,24 @@ export class ProfessionalController {
   // DELETE /api/professionals/:id
   static async deleteProfessional(req: Request, res: Response) {
     try {
-      const professional = await Professional.findByIdAndDelete(req.params.id);
+      const { id } = req.params;
 
+      const professional = await Professional.findById(id);
       if (!professional) {
-        return res.status(404).json({ ok: false, msg: 'Profesional no encontrado' });
+        return res.status(404).json({
+          ok: false,
+          msg: 'Profesional no encontrado'
+        });
       }
 
-      return res.json({
+      // opcional: validar business
+
+      await Appointment.deleteMany({ professional: id });
+      await professional.deleteOne();
+
+      return res.status(200).json({
         ok: true,
-        msg: 'Profesional eliminado'
+        msg: 'Profesional y turnos asociados eliminados correctamente'
       });
     } catch (error) {
       console.error(error);

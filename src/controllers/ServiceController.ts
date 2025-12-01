@@ -1,5 +1,7 @@
 import type { Request, Response } from 'express';
 import { Service } from '../models/Service';
+import { Appointment } from '../models/Appointment';
+import { Professional } from '../models/Professional';
 
 export class ServiceController {
 
@@ -97,15 +99,27 @@ export class ServiceController {
   // DELETE /api/services/:id
   static async deleteService(req: Request, res: Response) {
     try {
-      const service = await Service.findByIdAndDelete(req.params.id);
+      const { id } = req.params;
 
+      const service = await Service.findById(id);
       if (!service) {
-        return res.status(404).json({ ok: false, msg: 'Servicio no encontrado' });
+        return res.status(404).json({
+          ok: false,
+          msg: 'Servicio no encontrado'
+        });
       }
+      await Appointment.deleteMany({ service: id });
 
-      return res.json({
+      await Professional.updateMany(
+        { services: id },
+        { $pull: { services: id } }
+      );
+
+      await service.deleteOne();
+
+      return res.status(200).json({
         ok: true,
-        msg: 'Servicio eliminado'
+        msg: 'Servicio eliminado. Turnos y referencias en profesionales limpiados correctamente'
       });
     } catch (error) {
       console.error(error);
