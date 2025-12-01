@@ -11,6 +11,17 @@ export class AppointmentController {
     return h * 60 + m;
     }
 
+   private static applyTime(baseDate: Date, time: string): Date {
+      const [h, m] = time.split(':').map(Number);
+      const d = new Date(baseDate);
+      d.setHours(h, m, 0, 0);
+      return d;
+   }
+
+   private static rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
+      return aStart < bEnd && aEnd > bStart;
+   }
+
     private static isWithinWorkingHours(
     professional: any,
     start: Date,
@@ -176,160 +187,176 @@ export class AppointmentController {
    // POST /api/appointments
    static async createAppointment(req: Request, res: Response) {
       try {
-         const { service, professional, client, start } = req.body;
+         const {
+            service: serviceId,
+            professional: professionalId,
+            client: clientId,
+            start,
+            end,
+            notes,
+            status,
+            source
+         } = req.body;
 
-         if (!service || !professional || !client || !start) {
+         if (!serviceId || !professionalId || !clientId || !start) {
             return res.status(400).json({
                ok: false,
-               msg: "service, professional, client y start son obligatorios",
+               msg: 'Faltan datos obligatorios (service, professional, client, start)'
             });
          }
 
-         // Traemos docs relacionados
-         const [serviceDoc, professionalDoc, clientDoc] = await Promise.all([
-            Service.findById(service),
-            Professional.findById(professional),
-            Client.findById(client),
+         const startDate = new Date(start);
+            if (isNaN(startDate.getTime())) {
+            return res.status(400).json({
+               ok: false,
+               msg: 'La fecha de inicio (start) no es válida'
+            });
+         }
+
+         // 1) Traemos service y professional
+         const [service, professional] = await Promise.all([
+            Service.findById(serviceId),
+            Professional.findById(professionalId)
          ]);
 
-         if (!serviceDoc) {
-            return res
-               .status(404)
-               .json({ ok: false, msg: "Servicio no encontrado" });
-         }
-         if (!professionalDoc) {
-            return res
-               .status(404)
-               .json({ ok: false, msg: "Profesional no encontrado" });
-         }
-         if (!clientDoc) {
-            return res
-               .status(404)
-               .json({ ok: false, msg: "Cliente no encontrado" });
-         }
-
-         // Validar multi-tenant: mismo negocio
-         const businessId = professionalDoc.business.toString();
-
-         if (serviceDoc.business.toString() !== businessId) {
-            return res.status(400).json({
+         if (!service) {
+            return res.status(404).json({
                ok: false,
-               msg: "El servicio no pertenece al mismo negocio que el profesional",
+               msg: 'Servicio no encontrado'
             });
          }
 
-         if (clientDoc.business.toString() !== businessId) {
-            return res.status(400).json({
+         if (!professional) {
+            return res.status(404).json({
                ok: false,
-               msg: "El cliente no pertenece al mismo negocio que el profesional",
+               msg: 'Profesional no encontrado'
             });
          }
 
-         // Validar que el profesional realmente haga ese servicio
-         const professionalServices = professionalDoc.services.map((s) =>
-            s.toString()
-         );
-         if (!professionalServices.includes(serviceDoc._id.toString())) {
+         if (!professional.isActive) {
             return res.status(400).json({
                ok: false,
-               msg: "El profesional no tiene asignado este servicio",
+               msg: 'El profesional no está activo'
             });
          }
 
-         // Parsear start y end
-         const startDate = new Date(start);
-         if (isNaN(startDate.getTime())) {
-            return res.status(400).json({
-               ok: false,
-               msg: "Fecha de inicio inválida",
-            });
-         }
-
+         // 2) Calculamos end si no viene desde el front
          let endDate: Date;
-         if (req.body.end) {
-            endDate = new Date(req.body.end);
+         if (end) {
+            endDate = new Date(end);
          } else {
-            endDate = new Date(
-               startDate.getTime() + serviceDoc.durationMinutes * 60000
-            );
+            const duration = service.durationMinutes || 60;
+            endDate = new Date(startDate.getTime() + duration * 60 * 1000);
          }
 
-         if (isNaN(endDate.getTime()) || endDate <= startDate) {
+         if (isNaN(endDate.getTime())) {
             return res.status(400).json({
                ok: false,
-               msg: "Fecha de fin inválida",
+               msg: 'La fecha de fin (end) no es válida'
             });
          }
 
-         // Validar horario laboral
-            const isWithinHours = AppointmentController.isWithinWorkingHours(
-            professionalDoc,
-            startDate,
-            endDate
-            );
-
-            if (!isWithinHours) {
+         if (endDate <= startDate) {
             return res.status(400).json({
-                ok: false,
-                msg: 'El turno está fuera del horario laboral del profesional'
+               ok: false,
+               msg: 'La fecha de fin debe ser posterior a la de inicio'
             });
-            }
+         }
 
-            // Validar que no esté en vacaciones/licencia
-            const isInTimeOff = AppointmentController.isInTimeOff(
-            professionalDoc,
-            startDate,
-            endDate
-            );
+         const dayOfWeek = startDate.getDay(); // 0 = domingo ... 6 = sábado
+         const dayWorkingHours = professional.workingHours?.filter(
+            (wh: any) => wh.dayOfWeek === dayOfWeek
+         ) || [];
 
-            if (isInTimeOff) {
+         if (!dayWorkingHours.length) {
             return res.status(400).json({
-                ok: false,
-                msg: 'El profesional no está disponible en ese horario (licencia/vacaciones)'
+               ok: false,
+               msg: 'El profesional no tiene horario configurado para ese día'
             });
-            }
+         }
 
-
-         // ✅ Verificar solapado de turnos del profesional
-         const exceeds = await AppointmentController.exceedsOverlapLimit({
-            professionalId: professionalDoc._id.toString(),
-            serviceId: serviceDoc._id.toString(),
-            start: startDate,
-            end: endDate,
-            allowOverlapProfessional: professionalDoc.allowOverlap ?? false,
-            allowOverlapService: serviceDoc.allowOverlap ?? false,
-            maxConcurrentAppointments:
-               serviceDoc.maxConcurrentAppointments ?? 1,
+         // Verificamos que [startDate, endDate) esté completamente dentro de algún rango definido
+         const isInsideWorkingHours = dayWorkingHours.some((wh: any) => {
+            const whStart = AppointmentController.applyTime(startDate, wh.startTime);
+            const whEnd = AppointmentController.applyTime(startDate, wh.endTime);
+            return startDate >= whStart && endDate <= whEnd;
          });
 
-         if (exceeds) {
+         if (!isInsideWorkingHours) {
             return res.status(400).json({
                ok: false,
-               msg: "El profesional ya alcanzó el máximo de turnos solapados para este servicio en ese horario",
+               msg: 'El turno está fuera del horario laboral del profesional'
             });
          }
 
-         // Crear turno: forzamos business desde el profesional
+         const hasTimeOffConflict = (professional.timeOff || []).some((to: any) =>
+            AppointmentController.rangesOverlap(startDate, endDate, to.start, to.end)
+         );
+
+         if (hasTimeOffConflict) {
+            return res.status(400).json({
+               ok: false,
+               msg: 'El turno cae dentro de un bloqueo / vacaciones del profesional'
+            });
+         }
+
+         const overlappingAppointments = await Appointment.find({
+            professional: professionalId,
+            start: { $lt: endDate },
+            end: { $gt: startDate }
+         });
+
+         if (overlappingAppointments.length > 0) {
+         
+            if (!professional.allowOverlap) {
+               return res.status(400).json({
+                  ok: false,
+                  msg: 'El profesional no permite solapamiento de turnos'
+               });
+            }
+
+            if (!service.allowOverlap) {
+               return res.status(400).json({
+                  ok: false,
+                  msg: 'El servicio no permite solapamiento de turnos'
+               });
+            }
+
+
+            const concurrentCount = overlappingAppointments.length;
+
+            const maxAllowed = service.maxConcurrentAppointments || 1;
+
+            if (concurrentCount >= maxAllowed) {
+               return res.status(400).json({
+                  ok: false,
+                  msg: `El servicio permite un máximo de ${maxAllowed} turnos simultáneos`
+               });
+            }
+         }
+
          const appointment = await Appointment.create({
-            ...req.body,
-            business: businessId,
-            service: serviceDoc._id,
-            professional: professionalDoc._id,
-            client: clientDoc._id,
-            start: startDate,
-            end: endDate,
+         service: serviceId,
+         professional: professionalId,
+         client: clientId,
+         start: startDate,
+         end: endDate,
+         notes,
+         status: status || 'confirmed',
+         source: source || 'manual',
+         business: professional.business
          });
 
          return res.status(201).json({
-            ok: true,
-            msg: "Turno creado correctamente",
-            appointment,
+         ok: true,
+         msg: 'Turno creado correctamente',
+         appointment
          });
       } catch (error) {
          console.error(error);
          return res.status(500).json({
-            ok: false,
-            msg: "Error al crear el turno",
+         ok: false,
+         msg: 'Error al crear el turno'
          });
       }
    }
