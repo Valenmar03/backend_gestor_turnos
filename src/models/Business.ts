@@ -1,11 +1,15 @@
-import mongoose, { Schema, Document, Model } from 'mongoose';
+import mongoose, { Schema, Document, Model } from "mongoose";
 
 export type DayKey = "mon" | "tue" | "wed" | "thu" | "fri" | "sat" | "sun";
 
+export type TimeRange = {
+  startTime: string; // "08:00"
+  endTime: string;   // "13:00"
+};
+
 export type DaySchedule = {
   enabled: boolean;
-  startTime: string; // "09:00"
-  endTime: string;   // "20:00"
+  ranges: TimeRange[]; // 0..n (para almuerzo usás 2)
 };
 
 export type OpeningHours = Record<DayKey, DaySchedule>;
@@ -22,25 +26,58 @@ export interface IBusiness extends Document {
   openingHours: OpeningHours;
 }
 
+/** ===== Schemas ===== */
 
-const dayScheduleSchema = new Schema(
+const timeRangeSchema = new Schema(
   {
-    enabled: { type: Boolean, default: true },
-    startTime: { type: String, default: "09:00" },
-    endTime: { type: String, default: "20:00" }
+    startTime: { type: String, required: true },
+    endTime: { type: String, required: true }
   },
   { _id: false }
 );
 
+const dayScheduleSchema = new Schema(
+  {
+    enabled: { type: Boolean, default: true },
+    ranges: {
+      type: [timeRangeSchema],
+      default: [
+        { startTime: "08:00", endTime: "13:00" },
+        { startTime: "14:00", endTime: "19:00" }
+      ]
+    }
+  },
+  { _id: false }
+);
+
+// helper defaults por día
+const defaultWeekRange = () => ({
+  enabled: true,
+  ranges: [
+    { startTime: "08:00", endTime: "13:00" },
+    { startTime: "14:00", endTime: "19:00" }
+  ]
+});
+
+const defaultSaturday = () => ({
+  enabled: true,
+  ranges: [{ startTime: "10:00", endTime: "14:00" }]
+});
+
+const defaultSunday = () => ({
+  enabled: false,
+  ranges: []
+});
+
 const openingHoursSchema = new Schema(
   {
-    mon: { type: dayScheduleSchema, default: () => ({ enabled: true, startTime: "09:00", endTime: "20:00" }) },
-    tue: { type: dayScheduleSchema, default: () => ({ enabled: true, startTime: "09:00", endTime: "20:00" }) },
-    wed: { type: dayScheduleSchema, default: () => ({ enabled: true, startTime: "09:00", endTime: "20:00" }) },
-    thu: { type: dayScheduleSchema, default: () => ({ enabled: true, startTime: "09:00", endTime: "20:00" }) },
-    fri: { type: dayScheduleSchema, default: () => ({ enabled: true, startTime: "09:00", endTime: "20:00" }) },
-    sat: { type: dayScheduleSchema, default: () => ({ enabled: true, startTime: "10:00", endTime: "14:00" }) },
-    sun: { type: dayScheduleSchema, default: () => ({ enabled: false, startTime: "09:00", endTime: "20:00" }) }
+    mon: { type: dayScheduleSchema, default: defaultWeekRange },
+    tue: { type: dayScheduleSchema, default: defaultWeekRange },
+    wed: { type: dayScheduleSchema, default: defaultWeekRange },
+    thu: { type: dayScheduleSchema, default: defaultWeekRange },
+    fri: { type: dayScheduleSchema, default: defaultWeekRange },
+    sat: { type: dayScheduleSchema, default: defaultSaturday },
+    sun: { type: dayScheduleSchema, default: defaultSunday }
   },
   { _id: false }
 );
@@ -61,6 +98,5 @@ const businessSchema = new Schema(
   { timestamps: true }
 );
 
-
 export const Business: Model<IBusiness> =
-  mongoose.models.Business || mongoose.model<IBusiness>('Business', businessSchema);
+  mongoose.models.Business || mongoose.model<IBusiness>("Business", businessSchema);
