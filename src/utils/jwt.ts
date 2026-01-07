@@ -1,18 +1,22 @@
-import jwt from "jsonwebtoken";
+// utils/jwt.ts
+import jwt, { type Secret, type SignOptions } from "jsonwebtoken";
 
-const JWT_SECRET = process.env.JWT_SECRET!;
-const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || "7d";
+export type JwtPayload = { sub: string; businessId: string; role: string };
 
-export type JwtPayload = {
-  sub: string;         // userId
-  businessId: string;
-  role: string;
-};
+function getJwtSecret(): Secret {
+  const s = process.env.JWT_SECRET;
+  if (!s) throw new Error("Falta JWT_SECRET en el .env");
+  return s;
+}
+
+function getExpiresIn(): SignOptions["expiresIn"] {
+  return (process.env.JWT_EXPIRES_IN as SignOptions["expiresIn"]) ?? "7d";
+}
 
 export function signToken(payload: JwtPayload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: JWT_EXPIRES_IN });
+  return jwt.sign(payload, getJwtSecret(), { expiresIn: getExpiresIn() });
 }
 
 export function verifyToken(token: string) {
-  return jwt.verify(token, JWT_SECRET) as JwtPayload;
+  return jwt.verify(token, getJwtSecret()) as JwtPayload;
 }
