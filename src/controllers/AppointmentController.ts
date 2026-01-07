@@ -3,69 +3,142 @@ import { Appointment } from "../models/Appointment";
 import { Service } from "../models/Service";
 import { Professional } from "../models/Professional";
 import { Client } from "../models/Client";
+import { Business } from "../models/Business";
 
 
 export class AppointmentController {
-    private static timeStringToMinutes(time: string): number {
-    const [h, m] = time.split(':').map(Number);
-    return h * 60 + m;
-    }
+   private static timeStringToMinutes(time: string): number {
+      const [h, m] = time.split(":").map(Number);
+      return h * 60 + m;
+   }
 
    private static applyTime(baseDate: Date, time: string): Date {
-      const [h, m] = time.split(':').map(Number);
+      const [h, m] = time.split(":").map(Number);
       const d = new Date(baseDate);
       d.setHours(h, m, 0, 0);
       return d;
    }
 
-   private static rangesOverlap(aStart: Date, aEnd: Date, bStart: Date, bEnd: Date): boolean {
+   private static rangesOverlap(
+      aStart: Date,
+      aEnd: Date,
+      bStart: Date,
+      bEnd: Date
+   ): boolean {
       return aStart < bEnd && aEnd > bStart;
    }
 
-    private static isWithinWorkingHours(
-    professional: any,
-    start: Date,
-    end: Date
-    ): boolean {
-    const dayOfWeek = start.getDay();
+   private static isWithinWorkingHours(
+      professional: any,
+      start: Date,
+      end: Date
+   ): boolean {
+      const dayOfWeek = start.getDay();
 
-    if (start.toDateString() !== end.toDateString()) {
-        return false;
-    }
+      if (start.toDateString() !== end.toDateString()) {
+         return false;
+      }
 
-    const daySchedule = professional.workingHours?.filter(
-        (wh: any) => wh.dayOfWeek === dayOfWeek
-    );
+      const daySchedule = professional.workingHours?.filter(
+         (wh: any) => wh.dayOfWeek === dayOfWeek
+      );
 
-    if (!daySchedule || daySchedule.length === 0) {
-        return false;
-    }
+      if (!daySchedule || daySchedule.length === 0) {
+         return false;
+      }
 
-    const startMinutes = start.getHours() * 60 + start.getMinutes();
-    const endMinutes = end.getHours() * 60 + end.getMinutes();
+      const startMinutes = start.getHours() * 60 + start.getMinutes();
+      const endMinutes = end.getHours() * 60 + end.getMinutes();
 
-    return daySchedule.some((wh: any) => {
-        const whStart = this.timeStringToMinutes(wh.startTime);
-        const whEnd = this.timeStringToMinutes(wh.endTime);
-        return startMinutes >= whStart && endMinutes <= whEnd;
-    });
-    }
+      return daySchedule.some((wh: any) => {
+         const whStart = this.timeStringToMinutes(wh.startTime);
+         const whEnd = this.timeStringToMinutes(wh.endTime);
+         return startMinutes >= whStart && endMinutes <= whEnd;
+      });
+   }
 
-    private static isInTimeOff(
-    professional: any,
-    start: Date,
-    end: Date
-    ): boolean {
-    const timeOff = professional.timeOff || [];
+   private static dayKeyFromDate(d: Date): "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat" {
+   // JS: 0=domingo ... 6=sábado
+   const map: Array<"sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat"> = [
+      "sun",
+      "mon",
+      "tue",
+      "wed",
+      "thu",
+      "fri",
+      "sat"
+   ];
+      return map[d.getDay()];
+   }
 
-    return timeOff.some((to: any) => {
-        const offStart = new Date(to.start);
-        const offEnd = new Date(to.end);
-        // Solapado de intervalos
-        return offStart < end && offEnd > start;
-    });
-    }
+   private static isWithinBusinessOpeningHours(
+   business: any,
+   start: Date,
+   end: Date
+   ): boolean {
+   // No permitimos turnos que crucen de día (tu modelo es por día)
+   if (start.toDateString() !== end.toDateString()) return false;
 
+   const dayKey = this.dayKeyFromDate(start);
+   const daySchedule = business.openingHours?.[dayKey];
+
+   if (!daySchedule || !daySchedule.enabled) return false;
+
+   const startMinutes = start.getHours() * 60 + start.getMinutes();
+   const endMinutes = end.getHours() * 60 + end.getMinutes();
+
+   const ranges = daySchedule.ranges ?? [];
+   if (!ranges.length) return false;
+
+   return ranges.some((r: any) => {
+      const rStart = this.timeStringToMinutes(r.startTime);
+      const rEnd = this.timeStringToMinutes(r.endTime);
+      return startMinutes >= rStart && endMinutes <= rEnd;
+   });
+   }
+
+
+   private static isInTimeOff(
+      professional: any,
+      start: Date,
+      end: Date
+   ): boolean {
+      const timeOff = professional.timeOff || [];
+
+      return timeOff.some((to: any) => {
+         const offStart = new Date(to.start);
+         const offEnd = new Date(to.end);
+         // Solapado de intervalos
+         return offStart < end && offEnd > start;
+      });
+   }
+
+   private static isWithinBusinessHours(
+      business: any,
+      start: Date,
+      end: Date
+   ): boolean {
+      const dayOfWeek = start.getDay();
+
+      // No permitimos turnos que crucen de día
+      if (start.toDateString() !== end.toDateString()) return false;
+
+      const daySchedule =
+         business.workingHours?.filter(
+            (wh: any) => wh.dayOfWeek === dayOfWeek
+         ) ?? [];
+
+      if (!daySchedule.length) return false;
+
+      const startMinutes = start.getHours() * 60 + start.getMinutes();
+      const endMinutes = end.getHours() * 60 + end.getMinutes();
+
+      return daySchedule.some((wh: any) => {
+         const whStart = this.timeStringToMinutes(wh.startTime);
+         const whEnd = this.timeStringToMinutes(wh.endTime);
+         return startMinutes >= whStart && endMinutes <= whEnd;
+      });
+   }
 
    private static async exceedsOverlapLimit(params: {
       professionalId: string;
@@ -195,52 +268,51 @@ export class AppointmentController {
             end,
             notes,
             status,
-            source
+            source,
          } = req.body;
 
          if (!serviceId || !professionalId || !clientId || !start) {
             return res.status(400).json({
                ok: false,
-               msg: 'Faltan datos obligatorios (service, professional, client, start)'
+               msg: "Faltan datos obligatorios (service, professional, client, start)",
             });
          }
 
          const startDate = new Date(start);
-            if (isNaN(startDate.getTime())) {
+         if (isNaN(startDate.getTime())) {
             return res.status(400).json({
                ok: false,
-               msg: 'La fecha de inicio (start) no es válida'
+               msg: "La fecha de inicio (start) no es válida",
             });
          }
 
          // 1) Traemos service y professional
          const [service, professional] = await Promise.all([
             Service.findById(serviceId),
-            Professional.findById(professionalId)
+            Professional.findById(professionalId),
          ]);
 
          if (!service) {
             return res.status(404).json({
                ok: false,
-               msg: 'Servicio no encontrado'
+               msg: "Servicio no encontrado",
             });
          }
 
          if (!professional) {
             return res.status(404).json({
                ok: false,
-               msg: 'Profesional no encontrado'
+               msg: "Profesional no encontrado",
             });
          }
 
          if (!professional.isActive) {
             return res.status(400).json({
                ok: false,
-               msg: 'El profesional no está activo'
+               msg: "El profesional no está activo",
             });
          }
 
-         // 2) Calculamos end si no viene desde el front
          let endDate: Date;
          if (end) {
             endDate = new Date(end);
@@ -252,76 +324,115 @@ export class AppointmentController {
          if (isNaN(endDate.getTime())) {
             return res.status(400).json({
                ok: false,
-               msg: 'La fecha de fin (end) no es válida'
+               msg: "La fecha de fin (end) no es válida",
             });
          }
 
          if (endDate <= startDate) {
             return res.status(400).json({
                ok: false,
-               msg: 'La fecha de fin debe ser posterior a la de inicio'
+               msg: "La fecha de fin debe ser posterior a la de inicio",
             });
          }
 
+         const business = await Business.findById(professional.business);
+
+         if (!business) {
+         return res.status(404).json({
+            ok: false,
+            msg: "Negocio no encontrado"
+         });
+         }
+
+         if (!business.isActive) {
+         return res.status(400).json({
+            ok: false,
+            msg: "El negocio no está activo"
+         });
+         }
+
+         const withinBusinessHours =
+         AppointmentController.isWithinBusinessOpeningHours(business, startDate, endDate);
+
+         if (!withinBusinessHours) {
+         return res.status(400).json({
+            ok: false,
+            msg: "El turno está fuera del horario del negocio"
+         });
+         }
+
+
+
          const dayOfWeek = startDate.getDay(); // 0 = domingo ... 6 = sábado
-         const dayWorkingHours = professional.workingHours?.filter(
-            (wh: any) => wh.dayOfWeek === dayOfWeek
-         ) || [];
+         const dayWorkingHours =
+            professional.workingHours?.filter(
+               (wh: any) => wh.dayOfWeek === dayOfWeek
+            ) || [];
 
          if (!dayWorkingHours.length) {
             return res.status(400).json({
                ok: false,
-               msg: 'El profesional no tiene horario configurado para ese día'
+               msg: "El profesional no tiene horario configurado para ese día",
             });
          }
 
          // Verificamos que [startDate, endDate) esté completamente dentro de algún rango definido
          const isInsideWorkingHours = dayWorkingHours.some((wh: any) => {
-            const whStart = AppointmentController.applyTime(startDate, wh.startTime);
-            const whEnd = AppointmentController.applyTime(startDate, wh.endTime);
+            const whStart = AppointmentController.applyTime(
+               startDate,
+               wh.startTime
+            );
+            const whEnd = AppointmentController.applyTime(
+               startDate,
+               wh.endTime
+            );
             return startDate >= whStart && endDate <= whEnd;
          });
 
          if (!isInsideWorkingHours) {
             return res.status(400).json({
                ok: false,
-               msg: 'El turno está fuera del horario laboral del profesional'
+               msg: "El turno está fuera del horario laboral del profesional",
             });
          }
 
-         const hasTimeOffConflict = (professional.timeOff || []).some((to: any) =>
-            AppointmentController.rangesOverlap(startDate, endDate, to.start, to.end)
+         const hasTimeOffConflict = (professional.timeOff || []).some(
+            (to: any) =>
+               AppointmentController.rangesOverlap(
+                  startDate,
+                  endDate,
+                  to.start,
+                  to.end
+               )
          );
 
          if (hasTimeOffConflict) {
             return res.status(400).json({
                ok: false,
-               msg: 'El turno cae dentro de un bloqueo / vacaciones del profesional'
+               msg: "El turno cae dentro de un bloqueo / vacaciones del profesional",
             });
          }
 
          const overlappingAppointments = await Appointment.find({
             professional: professionalId,
             start: { $lt: endDate },
-            end: { $gt: startDate }
+            end: { $gt: startDate },
          });
 
          if (overlappingAppointments.length > 0) {
-         
             if (!professional.allowOverlap) {
                return res.status(400).json({
                   ok: false,
-                  msg: 'El profesional no permite solapamiento de turnos'
+                  msg: "El profesional no permite solapamiento de turnos",
                });
             }
 
             if (!service.allowOverlap) {
                return res.status(400).json({
                   ok: false,
-                  msg: 'El servicio no permite solapamiento de turnos'
+                  msg: "El servicio no permite solapamiento de turnos",
                });
             }
-
 
             const concurrentCount = overlappingAppointments.length;
 
@@ -330,33 +441,33 @@ export class AppointmentController {
             if (concurrentCount >= maxAllowed) {
                return res.status(400).json({
                   ok: false,
-                  msg: `El servicio permite un máximo de ${maxAllowed} turnos simultáneos`
+                  msg: `El servicio permite un máximo de ${maxAllowed} turnos simultáneos`,
                });
             }
          }
 
          const appointment = await Appointment.create({
-         service: serviceId,
-         professional: professionalId,
-         client: clientId,
-         start: startDate,
-         end: endDate,
-         notes,
-         status: status || 'confirmed',
-         source: source || 'manual',
-         business: professional.business
+            service: serviceId,
+            professional: professionalId,
+            client: clientId,
+            start: startDate,
+            end: endDate,
+            notes,
+            status: status || "confirmed",
+            source: source || "manual",
+            business: professional.business,
          });
 
          return res.status(201).json({
-         ok: true,
-         msg: 'Turno creado correctamente',
-         appointment
+            ok: true,
+            msg: "Turno creado correctamente",
+            appointment,
          });
       } catch (error) {
          console.error(error);
          return res.status(500).json({
-         ok: false,
-         msg: 'Error al crear el turno'
+            ok: false,
+            msg: "Error al crear el turno",
          });
       }
    }
@@ -437,34 +548,55 @@ export class AppointmentController {
             });
          }
 
+         const business = await Business.findById(businessId);
+
+         if (!business) {
+         return res.status(404).json({ ok: false, msg: "Negocio no encontrado" });
+         }
+
+         if (!business.isActive) {
+         return res.status(400).json({ ok: false, msg: "El negocio no está activo" });
+         }
+
+         const withinBusinessHours =
+         AppointmentController.isWithinBusinessOpeningHours(business, startDate, endDate);
+
+         if (!withinBusinessHours) {
+         return res.status(400).json({
+            ok: false,
+            msg: "El turno está fuera del horario del negocio"
+         });
+         }
+
+
+
          // Validar horario laboral
-        const isWithinHours = AppointmentController.isWithinWorkingHours(
-        professionalDoc,
-        startDate,
-        endDate
-        );
+         const isWithinHours = AppointmentController.isWithinWorkingHours(
+            professionalDoc,
+            startDate,
+            endDate
+         );
 
-        if (!isWithinHours) {
-        return res.status(400).json({
-            ok: false,
-            msg: 'El turno está fuera del horario laboral del profesional'
-        });
-        }
+         if (!isWithinHours) {
+            return res.status(400).json({
+               ok: false,
+               msg: "El turno está fuera del horario laboral del profesional",
+            });
+         }
 
-        // Validar que no esté en vacaciones/licencia
-        const isInTimeOff = AppointmentController.isInTimeOff(
-        professionalDoc,
-        startDate,
-        endDate
-        );
+         // Validar que no esté en vacaciones/licencia
+         const isInTimeOff = AppointmentController.isInTimeOff(
+            professionalDoc,
+            startDate,
+            endDate
+         );
 
-        if (isInTimeOff) {
-        return res.status(400).json({
-            ok: false,
-            msg: 'El profesional no está disponible en ese horario (licencia/vacaciones)'
-        });
-        }
-
+         if (isInTimeOff) {
+            return res.status(400).json({
+               ok: false,
+               msg: "El profesional no está disponible en ese horario (licencia/vacaciones)",
+            });
+         }
 
          // ✅ Verificar solapado excluyendo este turno
          const exceeds = await AppointmentController.exceedsOverlapLimit({
