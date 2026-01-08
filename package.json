@@ -3,8 +3,8 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
-    "dev": "nodemon --exec ts-node src/index.ts",
-    "seed:sysadmin": "ts-node src/seed/createSysAdmin.ts"
+    "dev": "nodemon --exec tsx src/index.ts",
+    "seed:sysadmin": "tsx src/seed/createSysAdmin.ts"
   },
   "keywords": [],
   "author": "",
@@ -25,6 +25,7 @@
     "@types/jsonwebtoken": "^9.0.10",
     "nodemon": "^3.1.11",
     "ts-node": "^10.9.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3"
   }
 }
