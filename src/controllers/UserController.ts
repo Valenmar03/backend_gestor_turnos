@@ -1,6 +1,8 @@
 import type { Request, Response } from "express";
 import crypto from "crypto";
 import { User, hashPassword, USER_ROLES, type UserRole } from "../models/User";
+import { Business } from "../models/Business";
+import { Appointment } from "../models/Appointment";
 
 function generateTempPassword(length = 10) {
   return crypto.randomBytes(16).toString("hex").slice(0, length);
@@ -40,8 +42,6 @@ export class UserController {
       }
 
       // ===== Reglas de creación por rol del creador =====
-
-      // OWNER: solo puede crear BADMIN/PROFESSIONAL y solo dentro de su negocio
       let finalBusinessId: string | null = null;
 
       if (creatorRole === "OWNER") {
@@ -56,9 +56,7 @@ export class UserController {
         finalBusinessId = req.user.businessId; // ignora lo que manden
       }
 
-      // SYS_ADMIN: puede crear para cualquier negocio, pero:
       if (creatorRole === "SYS_ADMIN") {
-        // SYS_ADMIN puede crear SYS_ADMIN sin businessId
         if (role === "SYS_ADMIN") {
           finalBusinessId = null;
         } else {
@@ -86,6 +84,22 @@ export class UserController {
         isActive: true,
       });
 
+      if (role === "OWNER" && finalBusinessId) {
+        const updatedBusiness = await Business.findByIdAndUpdate(
+          finalBusinessId,
+          { ownerUserId: user._id },
+          { new: true }
+        );
+
+        if (!updatedBusiness) {
+
+          return res.status(404).json({
+            ok: false,
+            msg: "Usuario creado, pero no se encontró el negocio para asignarle owner",
+          });
+        }
+      }
+
       return res.status(201).json({
         ok: true,
         msg: "Usuario creado",
@@ -101,7 +115,6 @@ export class UserController {
         tempPassword: password ? undefined : plainPassword,
       });
     } catch (error: any) {
-      // Email duplicado (Mongo)
       if (error?.code === 11000) {
         return res.status(409).json({ ok: false, msg: "Ya existe un usuario con ese email" });
       }
@@ -135,4 +148,164 @@ export class UserController {
       return res.status(500).json({ ok: false, msg: "Error al obtener usuarios" });
     }
   }
+
+  static async setUserStatus(req: Request, res: Response) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ ok: false, msg: "No autenticado" });
+      }
+
+      const requester = req.user;
+      const targetUserId = req.params.id;
+      const { isActive } = req.body as { isActive?: boolean };
+
+      if (typeof isActive !== "boolean") {
+        return res.status(400).json({ ok: false, msg: "isActive es requerido" });
+      }
+
+      const target = await User.findById(targetUserId);
+      if (!target) {
+        return res.status(404).json({ ok: false, msg: "Usuario no encontrado" });
+      }
+
+      // No permitir tocar SYS_ADMIN (salvo SYS_ADMIN, si querés, pero yo recomiendo bloquear igual)
+      if (target.role === "SYS_ADMIN") {
+        return res.status(403).json({ ok: false, msg: "No se puede modificar un SYS_ADMIN" });
+      }
+
+      if (requester.userId === target._id.toString()) {
+        return res.status(403).json({ ok: false, msg: "No podés modificar tu propio estado" });
+      }
+
+      if (requester.role === "OWNER") {
+        if (!requester.businessId) {
+          return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+        }
+        if (!target.businessId || target.businessId.toString() !== requester.businessId) {
+          return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
+        }
+
+        // Opcional: owner no puede desactivar a otro OWNER
+        if (target.role === "OWNER") {
+          return res.status(403).json({ ok: false, msg: "No podés modificar el estado de otro OWNER" });
+        }
+      }
+
+      if (isActive === false) {
+        const now = new Date();
+
+        const activeStatuses = ["PENDING", "CONFIRMED"]; // ajustalo a tus estados reales
+
+        const count = await Appointment.countDocuments({
+          professionalId: target._id,
+          status: { $in: activeStatuses },
+          startAt: { $gte: now }, // o el campo que uses
+        });
+
+        if (count > 0) {
+          return res.status(409).json({
+            ok: false,
+            msg: `No se puede desactivar: tiene ${count} turno(s) activo(s) o futuro(s). Reasigná/cancelá antes.`,
+          });
+        }
+      }
+
+      target.isActive = isActive;
+      await target.save();
+
+      return res.json({
+        ok: true,
+        msg: isActive ? "Usuario activado" : "Usuario desactivado",
+        user: {
+          id: target._id,
+          name: target.name,
+          email: target.email,
+          role: target.role,
+          businessId: target.businessId ?? null,
+          isActive: target.isActive,
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ ok: false, msg: "Error al actualizar estado del usuario" });
+    }
+  }
+
+  static async setUserRole(req: Request, res: Response) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ ok: false, msg: "No autenticado" });
+      }
+
+      const requester = req.user;
+      const targetUserId = req.params.id;
+      const { role } = req.body as { role?: UserRole };
+
+      if (!role) {
+        return res.status(400).json({ ok: false, msg: "role es requerido" });
+      }
+
+      if (!USER_ROLES.includes(role)) {
+        return res.status(400).json({ ok: false, msg: "Rol inválido" });
+      }
+
+      const target = await User.findById(targetUserId);
+      if (!target) {
+        return res.status(404).json({ ok: false, msg: "Usuario no encontrado" });
+      }
+
+      // No permitir cambiarte tu propio rol
+      if (requester.userId === target._id.toString()) {
+        return res.status(403).json({ ok: false, msg: "No podés cambiar tu propio rol" });
+      }
+
+      // Bloqueo: no tocar SYS_ADMIN
+      if (target.role === "SYS_ADMIN") {
+        return res.status(403).json({ ok: false, msg: "No se puede modificar un SYS_ADMIN" });
+      }
+
+      // OWNER: solo en su negocio y solo BADMIN/PROFESSIONAL
+      if (requester.role === "OWNER") {
+        if (!requester.businessId) {
+          return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+        }
+
+        if (!target.businessId || target.businessId.toString() !== requester.businessId) {
+          return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
+        }
+
+        const allowedForOwner: UserRole[] = ["BADMIN", "PROFESSIONAL"];
+        if (!allowedForOwner.includes(role)) {
+          return res.status(403).json({ ok: false, msg: "OWNER solo puede asignar BADMIN o PROFESSIONAL" });
+        }
+
+        // opcional: owner no puede cambiar rol de otro OWNER (si existiera)
+        if (target.role === "OWNER") {
+          return res.status(403).json({ ok: false, msg: "No podés cambiar el rol de un OWNER" });
+        }
+      }
+
+      // SYS_ADMIN: puede cambiar casi todo (excepto SYS_ADMIN por bloqueo arriba)
+
+      target.role = role;
+      await target.save();
+
+      return res.json({
+        ok: true,
+        msg: "Rol actualizado",
+        user: {
+          id: target._id,
+          name: target.name,
+          email: target.email,
+          role: target.role,
+          businessId: target.businessId ?? null,
+          isActive: target.isActive,
+        },
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ ok: false, msg: "Error al actualizar rol" });
+    }
+  }
 }
+

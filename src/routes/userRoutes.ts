@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { body } from "express-validator";
+import { body, param } from "express-validator";
 import { UserController } from "../controllers/UserController";
 import { requireAuth } from "../middlewares/requireAuth";
 import { requireRole } from "../middlewares/requireRole";
@@ -27,6 +27,26 @@ router.get(
     requireAuth,
     requireRole("SYS_ADMIN", "OWNER"),
     UserController.getUsers
+);
+
+router.patch(
+    "/:id/status",
+    requireAuth,
+    requireRole("SYS_ADMIN", "OWNER"),
+    param("id", "El id debe ser un MongoId válido").isMongoId(),
+    body("isActive", "isActive debe ser boolean").isBoolean(),
+    validateFields,
+    UserController.setUserStatus
+);
+
+router.patch(
+    "/:id/role",
+    requireAuth,
+    requireRole("SYS_ADMIN", "OWNER"),
+    param("id", "El id debe ser un MongoId válido").isMongoId(),
+    body("role", "role es requerido").notEmpty().isString(),
+    validateFields,
+    UserController.setUserRole
 );
 
 export default router;

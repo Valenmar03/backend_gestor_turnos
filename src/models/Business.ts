@@ -92,7 +92,7 @@ const businessSchema = new Schema(
     timezone: { type: String, default: "America/Argentina/Buenos_Aires" },
     isActive: { type: Boolean, default: true },
 
-    ownerUserId: { type: Schema.Types.ObjectId, ref: "User", required: true, index: true },
+    ownerUserId: { type: Schema.Types.ObjectId, ref: "User", index: true },
 
     appointmentIntervalMin: { type: Number, default: 30, min: 5 },
     openingHours: { type: openingHoursSchema, default: () => ({}) }
