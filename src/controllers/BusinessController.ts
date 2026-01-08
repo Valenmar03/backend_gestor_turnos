@@ -100,4 +100,28 @@ export class BusinessController {
          });
       }
    }
+
+   static async getMyBusiness(req: Request, res: Response) {
+      try {
+         if (!req.user) {
+            return res.status(401).json({ ok: false, msg: "No autenticado" });
+         }
+
+         const businessId = req.user.businessId;
+         if (!businessId) {
+            return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+         }
+
+         const business = await Business.findById(businessId);
+
+         if (!business) {
+            return res.status(404).json({ ok: false, msg: "Negocio no encontrado" });
+         }
+
+         return res.json({ ok: true, business });
+      } catch (error) {
+         console.error(error);
+         return res.status(500).json({ ok: false, msg: "Error al obtener el negocio" });
+      }
+   }
 }
