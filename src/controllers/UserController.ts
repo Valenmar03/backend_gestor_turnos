@@ -25,6 +25,7 @@ export class UserController {
         businessId: businessIdFromBody,
         password,
         isBookable,
+        phone,
       } = req.body as {
         name?: string;
         email?: string;
@@ -32,19 +33,21 @@ export class UserController {
         businessId?: string;
         password?: string;
         isBookable?: boolean;
+        phone?: string;
       };
 
-      if (!name || !email || !role) {
+      if (!name || !email || !role || !phone) {
         return res
           .status(400)
-          .json({ ok: false, msg: "name, email y role son requeridos" });
+          .json({ ok: false, msg: "nombre, email, rol y teléfono son requeridos" });
       }
 
       if (!USER_ROLES.includes(role)) {
         return res.status(400).json({ ok: false, msg: "Rol inválido" });
       }
 
-      // ===== Reglas de creación por rol del creador =====
+      const ROLE_REQUIRES_BUSINESS: UserRole[] = ["OWNER", "BADMIN", "PROFESSIONAL"];
+
       let finalBusinessId: string | null = null;
 
       if (creatorRole === "OWNER") {
@@ -60,10 +63,8 @@ export class UserController {
             .json({ ok: false, msg: "Tu usuario no tiene negocio asignado" });
         }
 
-        finalBusinessId = req.user.businessId; // ignora lo que manden
-      }
-
-      if (creatorRole === "SYS_ADMIN") {
+        finalBusinessId = req.user.businessId;
+      } else if (creatorRole === "SYS_ADMIN") {
         if (role === "SYS_ADMIN") {
           finalBusinessId = null;
         } else {
@@ -74,12 +75,27 @@ export class UserController {
           }
           finalBusinessId = businessIdFromBody;
         }
-      }
-
-      if (creatorRole !== "SYS_ADMIN" && creatorRole !== "OWNER") {
+      } else {
         return res
           .status(403)
           .json({ ok: false, msg: "Sin permisos para crear usuarios" });
+      }
+
+      if (ROLE_REQUIRES_BUSINESS.includes(role) && !finalBusinessId) {
+        return res.status(400).json({
+          ok: false,
+          msg: `El rol requiere un negocio (businessId)`,
+        });
+      }
+
+      if (finalBusinessId) {
+        const businessExists = await Business.exists({ _id: finalBusinessId });
+        if (!businessExists) {
+          return res.status(404).json({
+            ok: false,
+            msg: "No existe el negocio",
+          });
+        }
       }
 
       const plainPassword = password?.trim() || generateTempPassword();
@@ -93,8 +109,10 @@ export class UserController {
         passwordHash,
         isBookable: typeof isBookable === "boolean" ? isBookable : true,
         isActive: true,
+        phone: phone.trim(),
       });
 
+      // Si en algún momento permitís que se cree OWNER por SYS_ADMIN, esto queda OK.
       if (role === "OWNER" && finalBusinessId) {
         const updatedBusiness = await Business.findByIdAndUpdate(
           finalBusinessId,
@@ -139,16 +157,17 @@ export class UserController {
           businessId: user.businessId ?? null,
           isActive: user.isActive,
           isBookable: user.isBookable,
+          phone: user.phone,
         },
         tempPassword: password ? undefined : plainPassword,
       });
     } catch (error: any) {
       if (error?.code === 11000) {
+        console.error(error);
         return res
           .status(409)
           .json({ ok: false, msg: "Ya existe un usuario con ese email" });
       }
-      console.error(error);
       return res.status(500).json({ ok: false, msg: "Error al crear usuario" });
     }
   }
@@ -285,17 +304,16 @@ export class UserController {
         return res.status(404).json({ ok: false, msg: "Usuario no encontrado" });
       }
 
-      // No permitir cambiarte tu propio rol
+
       if (requester.userId === target._id.toString()) {
         return res.status(403).json({ ok: false, msg: "No podés cambiar tu propio rol" });
       }
 
-      // Bloqueo: no tocar SYS_ADMIN
+
       if (target.role === "SYS_ADMIN") {
         return res.status(403).json({ ok: false, msg: "No se puede modificar un SYS_ADMIN" });
       }
 
-      // OWNER: solo en su negocio y solo BADMIN/PROFESSIONAL
       if (requester.role === "OWNER") {
         if (!requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
@@ -310,13 +328,10 @@ export class UserController {
           return res.status(403).json({ ok: false, msg: "OWNER solo puede asignar BADMIN o PROFESSIONAL" });
         }
 
-        // opcional: owner no puede cambiar rol de otro OWNER (si existiera)
         if (target.role === "OWNER") {
           return res.status(403).json({ ok: false, msg: "No podés cambiar el rol de un OWNER" });
         }
       }
-
-      // SYS_ADMIN: puede cambiar casi todo (excepto SYS_ADMIN por bloqueo arriba)
 
       target.role = role;
       await target.save();

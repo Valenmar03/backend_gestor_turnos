@@ -9,9 +9,10 @@ async function main() {
   const email = process.env.SYS_ADMIN_EMAIL;
   const password = process.env.SYS_ADMIN_PASSWORD;
   const name = process.env.SYS_ADMIN_NAME || "System Admin";
+  const phone = process.env.SYS_ADMIN_PHONE
 
-  if (!email || !password) {
-    throw new Error("Faltan SYS_ADMIN_EMAIL o SYS_ADMIN_PASSWORD en el .env");
+  if (!email || !password || !phone) {
+    throw new Error("Faltan SYS_ADMIN_EMAIL, SYS_ADMIN_PASSWORD o SYS_ADMIN_PHONE en el .env");
   }
 
   const existing = await User.findOne({ email: email.toLowerCase().trim() });
@@ -30,12 +31,14 @@ async function main() {
     role: "SYS_ADMIN",
     isActive: true,
     isBookable: false,
+    phone: phone
   });
 
   console.log("SYS_ADMIN creado:", {
     id: user._id.toString(),
     email: user.email,
     role: user.role,
+    phone: user.phone
   });
 
   await mongoose.disconnect();
