@@ -13,6 +13,38 @@ function signToken(payload: object) {
 }
 
 export class AuthController {
+  static async me(req: Request, res: Response) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ ok: false, msg: "No autenticado" });
+      }
+
+      const user = await User.findById(req.user.userId).select(
+        "_id name email role businessId isActive isBookable"
+      );
+
+      if (!user || !user.isActive) {
+        return res.status(401).json({ ok: false, msg: "Usuario inválido" });
+      }
+
+      return res.json({
+        ok: true,
+        user: {
+          id: user._id,
+          name: user.name,
+          email: user.email,
+          role: user.role,
+          businessId: user.businessId ?? null,
+          isActive: user.isActive,
+          isBookable: user.isBookable,
+        },
+      });
+    } catch (e) {
+      console.error(e);
+      return res.status(500).json({ ok: false, msg: "Error al obtener sesión" });
+    }
+  }
+
   static async login(req: Request, res: Response) {
     try {
       const { email, password } = req.body as {
