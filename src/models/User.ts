@@ -19,6 +19,7 @@ export interface IUser extends Document {
   name: string;
   email: string;
   passwordHash: string;
+  phone: string; 
 
   isActive: boolean;
   lastLoginAt?: Date;
@@ -78,6 +79,11 @@ const userSchema = new Schema<IUser>(
       type: Boolean,
       default: true,
     },
+
+    phone: {
+      type: String,
+      required: true
+    }
   },
   { timestamps: true }
 );
