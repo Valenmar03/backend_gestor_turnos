@@ -1,4 +1,4 @@
-import mongoose, { Schema, Document, Model, Types } from 'mongoose';
+import mongoose, { Schema, Document, Model, Types } from "mongoose";
 
 interface IWorkingHours {
   dayOfWeek: number; // 0=Domingo ... 6=Sábado
@@ -14,15 +14,14 @@ interface ITimeOff {
 
 export interface IProfessional extends Document {
   business: Types.ObjectId;
-  name: string;
-  email?: string;
-  phone?: string;
+
+  userId: Types.ObjectId;
+
   services: Types.ObjectId[];
   color?: string;
   workingHours: IWorkingHours[];
   timeOff: ITimeOff[];
-  isActive: boolean;
-  allowOverlap: boolean; 
+  allowOverlap: boolean;
 }
 
 const workingHoursSchema = new Schema<IWorkingHours>(
@@ -45,20 +44,26 @@ const timeOffSchema = new Schema<ITimeOff>(
 
 const professionalSchema = new Schema<IProfessional>(
   {
-    business: { type: Schema.Types.ObjectId, ref: 'Business', required: true },
-    name: { type: String, required: true, trim: true },
-    email: { type: String, trim: true },
-    phone: { type: String, trim: true },
-    services: [{ type: Schema.Types.ObjectId, ref: 'Service' }],
+    business: { type: Schema.Types.ObjectId, ref: "Business", required: true, index: true },
+
+    // ✅ 1 perfil por usuario
+    userId: {
+      type: Schema.Types.ObjectId,
+      ref: "User",
+      required: true,
+      unique: true,
+      index: true,
+    },
+
+    services: [{ type: Schema.Types.ObjectId, ref: "Service" }],
     color: { type: String, trim: true },
     workingHours: { type: [workingHoursSchema], default: [] },
     timeOff: { type: [timeOffSchema], default: [] },
-    isActive: { type: Boolean, default: true },
-    allowOverlap: { type: Boolean, default: false }
+    allowOverlap: { type: Boolean, default: false },
   },
   { timestamps: true }
 );
 
 export const Professional: Model<IProfessional> =
   mongoose.models.Professional ||
-  mongoose.model<IProfessional>('Professional', professionalSchema);
+  mongoose.model<IProfessional>("Professional", professionalSchema);

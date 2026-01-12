@@ -3,6 +3,7 @@ import crypto from "crypto";
 import { User, hashPassword, USER_ROLES, type UserRole } from "../models/User";
 import { Business } from "../models/Business";
 import { Appointment } from "../models/Appointment";
+import { Professional } from "../models/Professional";
 
 function generateTempPassword(length = 10) {
   return crypto.randomBytes(16).toString("hex").slice(0, length);
@@ -34,7 +35,9 @@ export class UserController {
       };
 
       if (!name || !email || !role) {
-        return res.status(400).json({ ok: false, msg: "name, email y role son requeridos" });
+        return res
+          .status(400)
+          .json({ ok: false, msg: "name, email y role son requeridos" });
       }
 
       if (!USER_ROLES.includes(role)) {
@@ -46,11 +49,15 @@ export class UserController {
 
       if (creatorRole === "OWNER") {
         if (role === "SYS_ADMIN" || role === "OWNER") {
-          return res.status(403).json({ ok: false, msg: "OWNER no puede crear SYS_ADMIN u OWNER" });
+          return res
+            .status(403)
+            .json({ ok: false, msg: "OWNER no puede crear SYS_ADMIN u OWNER" });
         }
 
         if (!req.user.businessId) {
-          return res.status(403).json({ ok: false, msg: "Tu usuario no tiene negocio asignado" });
+          return res
+            .status(403)
+            .json({ ok: false, msg: "Tu usuario no tiene negocio asignado" });
         }
 
         finalBusinessId = req.user.businessId; // ignora lo que manden
@@ -61,14 +68,18 @@ export class UserController {
           finalBusinessId = null;
         } else {
           if (!businessIdFromBody) {
-            return res.status(400).json({ ok: false, msg: "businessId es requerido para ese rol" });
+            return res
+              .status(400)
+              .json({ ok: false, msg: "businessId es requerido para ese rol" });
           }
           finalBusinessId = businessIdFromBody;
         }
       }
 
       if (creatorRole !== "SYS_ADMIN" && creatorRole !== "OWNER") {
-        return res.status(403).json({ ok: false, msg: "Sin permisos para crear usuarios" });
+        return res
+          .status(403)
+          .json({ ok: false, msg: "Sin permisos para crear usuarios" });
       }
 
       const plainPassword = password?.trim() || generateTempPassword();
@@ -92,12 +103,29 @@ export class UserController {
         );
 
         if (!updatedBusiness) {
-
           return res.status(404).json({
             ok: false,
             msg: "Usuario creado, pero no se encontró el negocio para asignarle owner",
           });
         }
+      }
+
+      if ((role === "BADMIN" || role === "PROFESSIONAL") && finalBusinessId) {
+        await Professional.updateOne(
+          { userId: user._id },
+          {
+            $setOnInsert: {
+              business: finalBusinessId,
+              userId: user._id,
+              services: [],
+              workingHours: [],
+              timeOff: [],
+              isActive: true,
+              allowOverlap: false,
+            },
+          },
+          { upsert: true }
+        );
       }
 
       return res.status(201).json({
@@ -116,12 +144,15 @@ export class UserController {
       });
     } catch (error: any) {
       if (error?.code === 11000) {
-        return res.status(409).json({ ok: false, msg: "Ya existe un usuario con ese email" });
+        return res
+          .status(409)
+          .json({ ok: false, msg: "Ya existe un usuario con ese email" });
       }
       console.error(error);
       return res.status(500).json({ ok: false, msg: "Error al crear usuario" });
     }
   }
+
 
   // GET /api/users (lista usuarios del negocio; SYS_ADMIN puede filtrar)
   static async getUsers(req: Request, res: Response) {

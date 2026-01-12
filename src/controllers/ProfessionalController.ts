@@ -1,213 +1,149 @@
-import type { Request, Response } from 'express';
-import { Professional } from '../models/Professional';
-import { Service } from '../models/Service';
-import { Appointment } from '../models/Appointment';
+import type { Request, Response } from "express";
+import { Professional } from "../models/Professional";
+import { Service } from "../models/Service";
 
 export class ProfessionalController {
-
-  // helper interno al controller o en un utils
   private static dedupeIds(ids: any[] = []) {
-    const unique = [...new Set(ids.map(id => id.toString()))];
-    return unique;
+    return [...new Set(ids.map((id) => id.toString()))];
   }
 
-
-  // GET /api/professionals?businessId=xxx
   static async getAllProfessionals(req: Request, res: Response) {
     try {
-      const { businessId } = req.query;
-
-      const filter: any = {};
-      if (businessId) {
-        filter.business = businessId;
+      if (!req.user?.businessId && req.user?.role !== "SYS_ADMIN") {
+        return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
       }
 
-      const professionals = await Professional.find(filter)
-        .populate('services')   // opcional: para ver los servicios que hace
-        .sort({ createdAt: -1 });
+      const businessId = req.user.role === "SYS_ADMIN"
+        ? (req.query.businessId as string | undefined)
+        : req.user.businessId;
 
-      return res.json({
-        ok: true,
-        professionals
-      });
+      if (!businessId) {
+        return res.status(400).json({ ok: false, msg: "businessId es requerido para SYS_ADMIN" });
+      }
+
+      const professionals = await Professional.find({ business: businessId })
+        .populate("services")
+        .populate("userId", "name email isActive role isBookable") // ✅ acá viene el nombre
+        .sort({ createdAt: -1 })
+        .lean();
+
+      return res.json({ ok: true, professionals });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al obtener los profesionales'
-      });
+      return res.status(500).json({ ok: false, msg: "Error al obtener los profesionales" });
     }
   }
 
-  // GET /api/professionals/:id
+  //GET /api/professionals/:id
   static async getProfessionalById(req: Request, res: Response) {
     try {
       const professional = await Professional.findById(req.params.id)
-        .populate('services');
+        .populate("services")
+        .populate("userId", "name email isActive role isBookable")
+        .lean();
 
       if (!professional) {
-        return res.status(404).json({ ok: false, msg: 'Profesional no encontrado' });
+        return res.status(404).json({ ok: false, msg: "Profesional no encontrado" });
+      }
+
+      // scope: si no es SYS_ADMIN, debe ser del mismo negocio
+      if (req.user?.role !== "SYS_ADMIN") {
+        const businessId = req.user?.businessId;
+        if (!businessId || professional.business.toString() !== businessId) {
+          return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
+        }
       }
 
       return res.json({ ok: true, professional });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al obtener el profesional'
-      });
+      return res.status(500).json({ ok: false, msg: "Error al obtener el profesional" });
     }
   }
-
-  // POST /api/professionals
-  static async createProfessional(req: Request, res: Response) {
-    try {
-      const { business, services } = req.body;
-
-      if (!business) {
-        return res.status(400).json({
-          ok: false,
-          msg: 'El campo business es obligatorio'
-        });
-      }
-
-      if (services && services.length > 0) {
-        req.body.services = ProfessionalController.dedupeIds(services);
-
-        const validServices = await Service.find({
-          _id: { $in: req.body.services },
-          business
-        }).select('_id');
-
-        if (validServices.length !== req.body.services.length) {
-          return res.status(400).json({
-            ok: false,
-            msg: 'Hay servicios que no pertenecen a este negocio'
-          });
-        }
-      }
-
-      const professional = await Professional.create(req.body);
-
-      return res.status(201).json({
-        ok: true,
-        msg: 'Profesional creado correctamente',
-        professional
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al crear el profesional'
-      });
-    }
-  }
-
 
   // PUT /api/professionals/:id
   static async updateProfessional(req: Request, res: Response) {
     try {
       const professional = await Professional.findById(req.params.id);
       if (!professional) {
-        return res.status(404).json({ ok: false, msg: 'Profesional no encontrado' });
+        return res.status(404).json({ ok: false, msg: "Profesional no encontrado" });
       }
 
-      const businessId = professional.business;
+      // scope negocio
+      if (req.user?.role !== "SYS_ADMIN") {
+        const businessId = req.user?.businessId;
+        if (!businessId || professional.business.toString() !== businessId) {
+          return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
+        }
+      }
 
+      const businessId = professional.business.toString();
+
+      // Validar services contra business
       if (req.body.services && req.body.services.length > 0) {
         req.body.services = ProfessionalController.dedupeIds(req.body.services);
 
         const validServices = await Service.find({
           _id: { $in: req.body.services },
-          business: businessId
-        }).select('_id');
+          business: businessId,
+        }).select("_id");
 
         if (validServices.length !== req.body.services.length) {
           return res.status(400).json({
             ok: false,
-            msg: 'Hay servicios que no pertenecen al negocio del profesional'
+            msg: "Hay servicios que no pertenecen al negocio del profesional",
           });
         }
       }
 
+      // Bloquear cambios prohibidos
       delete req.body.business;
+      delete req.body.userId;
+      delete req.body.name;
+      delete req.body.email;
+      delete req.body.phone;
+      delete req.body.isActive;
 
-      const updated = await Professional.findByIdAndUpdate(
-        req.params.id,
-        req.body,
-        { new: true }
-      ).populate('services');
+      const updated = await Professional.findByIdAndUpdate(req.params.id, req.body, { new: true })
+        .populate("services")
+        .populate("userId", "name email isActive role isBookable");
 
-      return res.json({
-        ok: true,
-        msg: 'Profesional actualizado',
-        professional: updated
-      });
+      return res.json({ ok: true, msg: "Perfil profesional actualizado", professional: updated });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al actualizar el profesional'
-      });
+      return res.status(500).json({ ok: false, msg: "Error al actualizar el profesional" });
     }
   }
 
-
-  // DELETE /api/professionals/:id
-  static async deleteProfessional(req: Request, res: Response) {
-    try {
-      const { id } = req.params;
-
-      const professional = await Professional.findById(id);
-      if (!professional) {
-        return res.status(404).json({
-          ok: false,
-          msg: 'Profesional no encontrado'
-        });
-      }
-
-      // opcional: validar business
-
-      await Appointment.deleteMany({ professional: id });
-      await professional.deleteOne();
-
-      return res.status(200).json({
-        ok: true,
-        msg: 'Profesional y turnos asociados eliminados correctamente'
-      });
-    } catch (error) {
-      console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al eliminar el profesional'
-      });
-    }
-  }
-
-  // POST /api/professionals/:id/timeoff  (para cargar vacaciones/licencias)
+  // POST /api/professionals/:id/timeoff
   static async addTimeOff(req: Request, res: Response) {
     try {
       const { start, end, reason } = req.body;
 
       const professional = await Professional.findById(req.params.id);
       if (!professional) {
-        return res.status(404).json({ ok: false, msg: 'Profesional no encontrado' });
+        return res.status(404).json({ ok: false, msg: "Profesional no encontrado" });
+      }
+
+      // scope negocio
+      if (req.user?.role !== "SYS_ADMIN") {
+        const businessId = req.user?.businessId;
+        if (!businessId || professional.business.toString() !== businessId) {
+          return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
+        }
       }
 
       professional.timeOff.push({ start, end, reason });
       await professional.save();
 
-      return res.json({
-        ok: true,
-        msg: 'Licencia / vacaciones agregadas',
-        professional
-      });
+      const populated = await Professional.findById(professional._id)
+        .populate("services")
+        .populate("userId", "name email isActive role isBookable");
+
+      return res.json({ ok: true, msg: "Licencia / vacaciones agregadas", professional: populated });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al agregar licencia'
-      });
+      return res.status(500).json({ ok: false, msg: "Error al agregar licencia" });
     }
   }
 
@@ -216,63 +152,44 @@ export class ProfessionalController {
     try {
       const { serviceId } = req.body;
 
-      if (!serviceId) {
-        return res.status(400).json({
-          ok: false,
-          msg: 'Debe enviar serviceId en el body'
-        });
-      }
-
       const professional = await Professional.findById(req.params.id);
       if (!professional) {
-        return res.status(404).json({
-          ok: false,
-          msg: 'Profesional no encontrado'
-        });
+        return res.status(404).json({ ok: false, msg: "Profesional no encontrado" });
+      }
+
+      // scope negocio
+      if (req.user?.role !== "SYS_ADMIN") {
+        const businessId = req.user?.businessId;
+        if (!businessId || professional.business.toString() !== businessId) {
+          return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
+        }
       }
 
       const service = await Service.findById(serviceId);
       if (!service) {
-        return res.status(404).json({
-          ok: false,
-          msg: 'Servicio no encontrado'
-        });
+        return res.status(404).json({ ok: false, msg: "Servicio no encontrado" });
       }
 
-      // ✅ Validar que el service pertenezca al mismo business que el professional
       if (service.business.toString() !== professional.business.toString()) {
-        return res.status(400).json({
-          ok: false,
-          msg: 'El servicio no pertenece al mismo negocio que el profesional'
-        });
+        return res.status(400).json({ ok: false, msg: "El servicio no pertenece al mismo negocio" });
       }
 
-      // ✅ Evitar duplicado
-      const alreadyHas = professional.services.some(
-        s => s.toString() === serviceId
-      );
-
+      const alreadyHas = professional.services.some((s) => s.toString() === serviceId);
       if (alreadyHas) {
-        return res.status(400).json({
-          ok: false,
-          msg: 'El profesional ya tiene asignado este servicio'
-        });
+        return res.status(400).json({ ok: false, msg: "El profesional ya tiene asignado este servicio" });
       }
 
       professional.services.push(service._id);
       await professional.save();
 
-      return res.json({
-        ok: true,
-        msg: 'Servicio agregado al profesional',
-        professional
-      });
+      const populated = await Professional.findById(professional._id)
+        .populate("services")
+        .populate("userId", "name email isActive role isBookable");
+
+      return res.json({ ok: true, msg: "Servicio agregado", professional: populated });
     } catch (error) {
       console.error(error);
-      return res.status(500).json({
-        ok: false,
-        msg: 'Error al agregar el servicio al profesional'
-      });
+      return res.status(500).json({ ok: false, msg: "Error al agregar el servicio" });
     }
   }
 }

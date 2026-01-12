@@ -2,6 +2,7 @@ import type { Request, Response } from 'express';
 import { Service } from '../models/Service';
 import { Appointment } from '../models/Appointment';
 import { Professional } from '../models/Professional';
+import { Business } from '../models/Business';
 
 export class ServiceController {
 
@@ -53,6 +54,14 @@ export class ServiceController {
   // POST /api/services
   static async createService(req: Request, res: Response) {
     try {
+
+      const business = await Business.findById(req.body.business)
+      if(!business){
+        return res.status(401).json({
+          ok: false,
+          msg: 'Negocio no encontrado'
+        });
+      }
       const service = await Service.create(req.body);
 
       return res.status(201).json({
@@ -61,7 +70,6 @@ export class ServiceController {
         service
       });
     } catch (error) {
-      console.error(error);
       return res.status(500).json({
         ok: false,
         msg: 'Error al crear el servicio'
