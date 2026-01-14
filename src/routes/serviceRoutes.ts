@@ -2,14 +2,20 @@ import { Router } from 'express';
 import { body, param } from 'express-validator';
 import { validateFields } from '../middlewares/validateFields';
 import { ServiceController } from '../controllers/ServiceController';
+import { requireAuth } from '../middlewares/requireAuth';
+import { requireBusinessScope } from '../middlewares/requireBusinessScope';
+import { requireRole } from '../middlewares/requireRole';
 
 const router = Router();
 
+router.use(requireAuth);
+router.use(requireBusinessScope);
 
-router.get('/', ServiceController.getAllServices);
+router.get('/', requireRole("SYS_ADMIN", "OWNER", "BADMIN", "PROFESSIONAL"), ServiceController.getAllServices);
 
 router.get(
     '/:id',
+    requireRole("SYS_ADMIN", "OWNER", "BADMIN", "PROFESSIONAL"),
     param('id', 'El id debe ser un MongoId válido').isMongoId(),
     validateFields,
     ServiceController.getServiceById
@@ -17,6 +23,7 @@ router.get(
 
 router.post(
     '/',
+    requireRole("SYS_ADMIN", "OWNER"),
     body('business', 'El business es obligatorio')
         .notEmpty()
         .isMongoId(),
@@ -55,6 +62,7 @@ router.post(
 
 router.put(
     '/:id',
+    requireRole("SYS_ADMIN", "OWNER"),
     param('id', 'El id debe ser un MongoId válido').isMongoId(),
     body('name', 'El nombre debe ser un string válido')
         .optional()
@@ -91,6 +99,7 @@ router.put(
 
 router.delete(
     '/:id',
+    requireRole("SYS_ADMIN", "OWNER"),
     param('id', 'El id debe ser un MongoId válido').isMongoId(),
     validateFields,
     ServiceController.deleteService
