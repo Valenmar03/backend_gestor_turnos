@@ -58,7 +58,7 @@ export class AppointmentController {
    }
 
    private static dayKeyFromDate(d: Date): "sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat" {
-   // JS: 0=domingo ... 6=sábado
+
    const map: Array<"sun" | "mon" | "tue" | "wed" | "thu" | "fri" | "sat"> = [
       "sun",
       "mon",
@@ -76,7 +76,6 @@ export class AppointmentController {
    start: Date,
    end: Date
    ): boolean {
-   // No permitimos turnos que crucen de día (tu modelo es por día)
    if (start.toDateString() !== end.toDateString()) return false;
 
    const dayKey = this.dayKeyFromDate(start);
@@ -108,7 +107,6 @@ export class AppointmentController {
       return timeOff.some((to: any) => {
          const offStart = new Date(to.start);
          const offEnd = new Date(to.end);
-         // Solapado de intervalos
          return offStart < end && offEnd > start;
       });
    }
@@ -120,7 +118,6 @@ export class AppointmentController {
    ): boolean {
       const dayOfWeek = start.getDay();
 
-      // No permitimos turnos que crucen de día
       if (start.toDateString() !== end.toDateString()) return false;
 
       const daySchedule =
@@ -141,6 +138,7 @@ export class AppointmentController {
    }
 
    private static async exceedsOverlapLimit(params: {
+      businessId: string;              
       professionalId: string;
       serviceId: string;
       start: Date;
@@ -149,8 +147,9 @@ export class AppointmentController {
       allowOverlapService: boolean;
       maxConcurrentAppointments: number;
       excludeId?: string;
-   }) {
+      }) {
       const {
+         businessId,
          professionalId,
          serviceId,
          start,
@@ -161,56 +160,58 @@ export class AppointmentController {
          excludeId,
       } = params;
 
-      if (
-         !allowOverlapProfessional ||
-         !allowOverlapService ||
-         maxConcurrentAppointments <= 1
-      ) {
+      if (!allowOverlapProfessional || !allowOverlapService || maxConcurrentAppointments <= 1) {
          const filter: any = {
+            business: businessId,                 
             professional: professionalId,
             status: { $ne: "cancelled" },
             start: { $lt: end },
             end: { $gt: start },
          };
-
-         if (excludeId) {
-            filter._id = { $ne: excludeId };
-         }
+         if (excludeId) filter._id = { $ne: excludeId };
 
          const existing = await Appointment.findOne(filter);
          return !!existing;
       }
 
       const filter: any = {
+         business: businessId,                   
          professional: professionalId,
          service: serviceId,
          status: { $ne: "cancelled" },
          start: { $lt: end },
          end: { $gt: start },
       };
-
-      if (excludeId) {
-         filter._id = { $ne: excludeId };
-      }
+      if (excludeId) filter._id = { $ne: excludeId };
 
       const count = await Appointment.countDocuments(filter);
-
       return count >= maxConcurrentAppointments;
-   }
+   }  
 
-   // GET /api/appointments?businessId=xxx&professionalId=yyy&from=2025-01-01&to=2025-01-31
+
    static async getAllAppointments(req: Request, res: Response) {
       try {
-         const { businessId, professionalId, from, to } = req.query;
+         if (!req.user) return res.status(401).json({ ok: false, msg: "No autenticado" });
+
+         const { professionalId, from, to, businessId: businessIdFromQuery } = req.query as any;
 
          const filter: any = {};
-         if (businessId) filter.business = businessId;
+
+         if (req.user.role === "SYS_ADMIN") {
+            if (businessIdFromQuery) filter.business = businessIdFromQuery;
+         } else {
+            if (!req.user.businessId) {
+            return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+            }
+            filter.business = req.user.businessId;
+         }
+
          if (professionalId) filter.professional = professionalId;
 
          if (from || to) {
             filter.start = {};
-            if (from) filter.start.$gte = new Date(from as string);
-            if (to) filter.start.$lte = new Date(to as string);
+            if (from) filter.start.$gte = new Date(from);
+            if (to) filter.start.$lte = new Date(to);
          }
 
          const appointments = await Appointment.find(filter)
@@ -219,358 +220,278 @@ export class AppointmentController {
             .populate("client")
             .sort({ start: 1 });
 
-         return res.json({
-            ok: true,
-            appointments,
-         });
+         return res.json({ ok: true, appointments });
       } catch (error) {
          console.error(error);
-         return res.status(500).json({
-            ok: false,
-            msg: "Error al obtener los turnos",
-         });
+         return res.status(500).json({ ok: false, msg: "Error al obtener los turnos" });
       }
-   }
+      }
 
-   // GET /api/appointments/:id
+
    static async getAppointmentById(req: Request, res: Response) {
       try {
-         const appointment = await Appointment.findById(req.params.id)
+         if (!req.user) return res.status(401).json({ ok: false, msg: "No autenticado" });
+
+         const filter: any = { _id: req.params.id };
+
+         if (req.user.role !== "SYS_ADMIN") {
+            if (!req.user.businessId) {
+            return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+            }
+            filter.business = req.user.businessId;
+         }
+
+         const appointment = await Appointment.findOne(filter)
             .populate("service")
             .populate("professional")
             .populate("client");
 
          if (!appointment) {
-            return res.status(404).json({
-               ok: false,
-               msg: "Turno no encontrado",
-            });
+            return res.status(404).json({ ok: false, msg: "Turno no encontrado" });
          }
 
          return res.json({ ok: true, appointment });
       } catch (error) {
          console.error(error);
-         return res.status(500).json({
-            ok: false,
-            msg: "Error al obtener el turno",
-         });
+         return res.status(500).json({ ok: false, msg: "Error al obtener el turno" });
       }
-   }
+}
 
-   // POST /api/appointments
+
    static async createAppointment(req: Request, res: Response) {
       try {
-         const {
-            service: serviceId,
-            professional: professionalId,
-            client: clientId,
-            start,
-            end,
-            notes,
-            status,
-            source,
-         } = req.body;
+         if (!req.user) {
+            return res.status(401).json({ ok: false, msg: "No autenticado" });
+         }
 
-         if (!serviceId || !professionalId || !clientId || !start) {
+         const businessId =
+            req.user.role === "SYS_ADMIN"
+            ? (req.body.business as string | undefined) ?? null
+            : req.user.businessId;
+
+         if (!businessId) {
+            return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+         }
+
+         const { service, professional, client, start, end, notes, source, status } = req.body as {
+            service: string;
+            professional: string;
+            client: string;
+            start: string;
+            end?: string; 
+            notes?: string;
+            source?: "manual" | "online";
+            status?: "pending" | "confirmed" | "cancelled" | "completed";
+            business?: string;
+         };
+
+         const [serviceDoc, profDoc, clientDoc, business] = await Promise.all([
+            Service.findOne({ _id: service, business: businessId, isActive: true }),
+            Professional.findOne({ _id: professional, business: businessId }),
+            Client.findOne({ _id: client, business: businessId }),
+            Business.findById(businessId),
+         ]);
+
+         if (!business) {
+            return res.status(404).json({ ok: false, msg: "Negocio no encontrado" });
+         }
+         if (!business.isActive) {
+            return res.status(400).json({ ok: false, msg: "El negocio no está activo" });
+         }
+
+         if (!serviceDoc) {
+            return res.status(404).json({
+            ok: false,
+            msg: "Servicio no encontrado, no pertenece a tu negocio o está desactivado",
+            });
+         }
+
+         if (!profDoc) {
+            return res.status(404).json({
+            ok: false,
+            msg: "Profesional no encontrado o no pertenece a tu negocio",
+            });
+         }
+
+         if (!clientDoc) {
+            return res.status(404).json({
+            ok: false,
+            msg: "Cliente no encontrado o no pertenece a tu negocio",
+            });
+         }
+
+         const professionalServices = (profDoc.services ?? []).map((s: any) => s.toString());
+         if (!professionalServices.includes(serviceDoc._id.toString())) {
             return res.status(400).json({
-               ok: false,
-               msg: "Faltan datos obligatorios (service, professional, client, start)",
+            ok: false,
+            msg: "El profesional no tiene asignado este servicio",
             });
          }
 
          const startDate = new Date(start);
-         if (isNaN(startDate.getTime())) {
-            return res.status(400).json({
-               ok: false,
-               msg: "La fecha de inicio (start) no es válida",
-            });
-         }
-
-         // 1) Traemos service y professional
-         const [service, professional] = await Promise.all([
-            Service.findById(serviceId),
-            Professional.findById(professionalId),
-         ]);
-
-         if (!service) {
-            return res.status(404).json({
-               ok: false,
-               msg: "Servicio no encontrado",
-            });
-         }
-
-         if (!professional) {
-            return res.status(404).json({
-               ok: false,
-               msg: "Profesional no encontrado",
-            });
-         }
-
-         if (!professional.isActive) {
-            return res.status(400).json({
-               ok: false,
-               msg: "El profesional no está activo",
-            });
+         if (Number.isNaN(startDate.getTime())) {
+            return res.status(400).json({ ok: false, msg: "start inválido (ISO date)" });
          }
 
          let endDate: Date;
          if (end) {
             endDate = new Date(end);
+            if (Number.isNaN(endDate.getTime())) {
+            return res.status(400).json({ ok: false, msg: "end inválido (ISO date)" });
+            }
          } else {
-            const duration = service.durationMinutes || 60;
-            endDate = new Date(startDate.getTime() + duration * 60 * 1000);
-         }
-
-         if (isNaN(endDate.getTime())) {
-            return res.status(400).json({
-               ok: false,
-               msg: "La fecha de fin (end) no es válida",
-            });
+            endDate = new Date(startDate.getTime() + serviceDoc.durationMinutes * 60000);
          }
 
          if (endDate <= startDate) {
-            return res.status(400).json({
-               ok: false,
-               msg: "La fecha de fin debe ser posterior a la de inicio",
-            });
-         }
-
-         const business = await Business.findById(professional.business);
-
-         if (!business) {
-         return res.status(404).json({
-            ok: false,
-            msg: "Negocio no encontrado"
-         });
-         }
-
-         if (!business.isActive) {
-         return res.status(400).json({
-            ok: false,
-            msg: "El negocio no está activo"
-         });
+            return res.status(400).json({ ok: false, msg: "end debe ser mayor a start" });
          }
 
          const withinBusinessHours =
-         AppointmentController.isWithinBusinessOpeningHours(business, startDate, endDate);
+            AppointmentController.isWithinBusinessOpeningHours(business, startDate, endDate);
 
          if (!withinBusinessHours) {
-         return res.status(400).json({
+            return res.status(400).json({
             ok: false,
-            msg: "El turno está fuera del horario del negocio"
-         });
-         }
-
-
-
-         const dayOfWeek = startDate.getDay(); // 0 = domingo ... 6 = sábado
-         const dayWorkingHours =
-            professional.workingHours?.filter(
-               (wh: any) => wh.dayOfWeek === dayOfWeek
-            ) || [];
-
-         if (!dayWorkingHours.length) {
-            return res.status(400).json({
-               ok: false,
-               msg: "El profesional no tiene horario configurado para ese día",
+            msg: "El turno está fuera del horario del negocio",
             });
          }
 
-         // Verificamos que [startDate, endDate) esté completamente dentro de algún rango definido
-         const isInsideWorkingHours = dayWorkingHours.some((wh: any) => {
-            const whStart = AppointmentController.applyTime(
-               startDate,
-               wh.startTime
-            );
-            const whEnd = AppointmentController.applyTime(
-               startDate,
-               wh.endTime
-            );
-            return startDate >= whStart && endDate <= whEnd;
-         });
-
-         if (!isInsideWorkingHours) {
+         const isWithinHours = AppointmentController.isWithinWorkingHours(profDoc, startDate, endDate);
+         if (!isWithinHours) {
             return res.status(400).json({
-               ok: false,
-               msg: "El turno está fuera del horario laboral del profesional",
+            ok: false,
+            msg: "El turno está fuera del horario laboral del profesional",
             });
          }
 
-         const hasTimeOffConflict = (professional.timeOff || []).some(
-            (to: any) =>
-               AppointmentController.rangesOverlap(
-                  startDate,
-                  endDate,
-                  to.start,
-                  to.end
-               )
-         );
-
-         if (hasTimeOffConflict) {
+         const isInTimeOff = AppointmentController.isInTimeOff(profDoc, startDate, endDate);
+         if (isInTimeOff) {
             return res.status(400).json({
-               ok: false,
-               msg: "El turno cae dentro de un bloqueo / vacaciones del profesional",
+            ok: false,
+            msg: "El profesional no está disponible en ese horario (licencia/vacaciones)",
             });
          }
 
-         const overlappingAppointments = await Appointment.find({
-            professional: professionalId,
-            start: { $lt: endDate },
-            end: { $gt: startDate },
+         const exceeds = await AppointmentController.exceedsOverlapLimit({
+            businessId,
+            professionalId: profDoc._id.toString(),
+            serviceId: serviceDoc._id.toString(),
+            start: startDate,
+            end: endDate,
+            allowOverlapProfessional: profDoc.allowOverlap ?? false,
+            allowOverlapService: serviceDoc.allowOverlap ?? false,
+            maxConcurrentAppointments: serviceDoc.maxConcurrentAppointments ?? 1,
          });
 
-         if (overlappingAppointments.length > 0) {
-            if (!professional.allowOverlap) {
-               return res.status(400).json({
-                  ok: false,
-                  msg: "El profesional no permite solapamiento de turnos",
-               });
-            }
-
-            if (!service.allowOverlap) {
-               return res.status(400).json({
-                  ok: false,
-                  msg: "El servicio no permite solapamiento de turnos",
-               });
-            }
-
-            const concurrentCount = overlappingAppointments.length;
-
-            const maxAllowed = service.maxConcurrentAppointments || 1;
-
-            if (concurrentCount >= maxAllowed) {
-               return res.status(400).json({
-                  ok: false,
-                  msg: `El servicio permite un máximo de ${maxAllowed} turnos simultáneos`,
-               });
-            }
+         if (exceeds) {
+            return res.status(400).json({
+            ok: false,
+            msg: "El profesional ya alcanzó el máximo de turnos solapados para este servicio en ese horario",
+            });
          }
 
          const appointment = await Appointment.create({
-            service: serviceId,
-            professional: professionalId,
-            client: clientId,
+            business: businessId,
+            service: serviceDoc._id,
+            professional: profDoc._id,
+            client: clientDoc._id,
             start: startDate,
             end: endDate,
-            notes,
-            status: status || "confirmed",
-            source: source || "manual",
-            business: professional.business,
+            notes: notes?.trim(),
+            source: source ?? "manual",
+            status: status ?? "confirmed",
          });
 
-         return res.status(201).json({
-            ok: true,
-            msg: "Turno creado correctamente",
-            appointment,
-         });
+         return res.status(201).json({ ok: true, msg: "Turno creado", appointment });
       } catch (error) {
          console.error(error);
-         return res.status(500).json({
-            ok: false,
-            msg: "Error al crear el turno",
-         });
+         return res.status(500).json({ ok: false, msg: "Error al crear turno" });
       }
-   }
+      }
 
-   // PUT /api/appointments/:id
    static async updateAppointment(req: Request, res: Response) {
       try {
-         const appointment = await Appointment.findById(req.params.id);
-         if (!appointment) {
-            return res.status(404).json({
-               ok: false,
-               msg: "Turno no encontrado",
-            });
+         if (!req.user) {
+            return res.status(401).json({ ok: false, msg: "No autenticado" });
          }
 
-         // Traemos docs actuales (por defecto) o nuevos si los cambian
+         const businessIdFromToken =
+            req.user.role === "SYS_ADMIN"
+            ? (req.body.business as string | undefined) ?? null
+            : req.user.businessId;
+
+         if (!businessIdFromToken) {
+            return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+         }
+
+         const appointment = await Appointment.findOne({
+            _id: req.params.id,
+            business: businessIdFromToken,
+         });
+
+         if (!appointment) {
+            return res.status(404).json({ ok: false, msg: "Turno no encontrado" });
+         }
+
          const serviceId = req.body.service || appointment.service;
-         const professionalId =
-            req.body.professional || appointment.professional;
+         const professionalId = req.body.professional || appointment.professional;
          const clientId = req.body.client || appointment.client;
 
-         const [serviceDoc, professionalDoc, clientDoc] = await Promise.all([
-            Service.findById(serviceId),
-            Professional.findById(professionalId),
-            Client.findById(clientId),
+         const [serviceDoc, professionalDoc, clientDoc, business] = await Promise.all([
+            Service.findOne({ _id: serviceId, business: businessIdFromToken, isActive: true }),
+            Professional.findOne({ _id: professionalId, business: businessIdFromToken }),
+            Client.findOne({ _id: clientId, business: businessIdFromToken }),
+            Business.findById(businessIdFromToken),
          ]);
 
-         if (!serviceDoc || !professionalDoc || !clientDoc) {
-            return res.status(400).json({
-               ok: false,
-               msg: "Servicio, profesional o cliente inválidos",
-            });
-         }
-
-         const businessId = professionalDoc.business.toString();
-
-         if (
-            serviceDoc.business.toString() !== businessId ||
-            clientDoc.business.toString() !== businessId
-         ) {
-            return res.status(400).json({
-               ok: false,
-               msg: "Los datos no pertenecen al mismo negocio",
-            });
-         }
-
-         const professionalServices = professionalDoc.services.map((s) =>
-            s.toString()
-         );
-         if (!professionalServices.includes(serviceDoc._id.toString())) {
-            return res.status(400).json({
-               ok: false,
-               msg: "El profesional no tiene asignado este servicio",
-            });
-         }
-
-         // start/end: tomamos los nuevos si vienen, sino los existentes
-         const startDate = req.body.start
-            ? new Date(req.body.start)
-            : appointment.start;
-         let endDate = req.body.end ? new Date(req.body.end) : appointment.end;
-
-         // si no vino end y cambió el servicio, recalculamos con nueva duración
-         if (!req.body.end && req.body.service) {
-            endDate = new Date(
-               startDate.getTime() + serviceDoc.durationMinutes * 60000
-            );
-         }
-
-         if (
-            isNaN(startDate.getTime()) ||
-            isNaN(endDate.getTime()) ||
-            endDate <= startDate
-         ) {
-            return res.status(400).json({
-               ok: false,
-               msg: "Rango de fechas inválido",
-            });
-         }
-
-         const business = await Business.findById(businessId);
-
          if (!business) {
-         return res.status(404).json({ ok: false, msg: "Negocio no encontrado" });
+            return res.status(404).json({ ok: false, msg: "Negocio no encontrado" });
          }
 
          if (!business.isActive) {
-         return res.status(400).json({ ok: false, msg: "El negocio no está activo" });
+            return res.status(400).json({ ok: false, msg: "El negocio no está activo" });
          }
 
-         const withinBusinessHours =
-         AppointmentController.isWithinBusinessOpeningHours(business, startDate, endDate);
+         if (!serviceDoc || !professionalDoc || !clientDoc) {
+            return res.status(400).json({
+            ok: false,
+            msg: "Servicio, profesional o cliente inválidos (o no pertenecen a tu negocio)",
+            });
+         }
+
+         const professionalServices = (professionalDoc.services ?? []).map((s: any) => s.toString());
+         if (!professionalServices.includes(serviceDoc._id.toString())) {
+            return res.status(400).json({
+            ok: false,
+            msg: "El profesional no tiene asignado este servicio",
+            });
+         }
+
+         const startDate = req.body.start ? new Date(req.body.start) : appointment.start;
+         let endDate = req.body.end ? new Date(req.body.end) : appointment.end;
+
+         if (!req.body.end && req.body.service) {
+            endDate = new Date(startDate.getTime() + serviceDoc.durationMinutes * 60000);
+         }
+
+         if (isNaN(startDate.getTime()) || isNaN(endDate.getTime()) || endDate <= startDate) {
+            return res.status(400).json({ ok: false, msg: "Rango de fechas inválido" });
+         }
+
+         const withinBusinessHours = AppointmentController.isWithinBusinessOpeningHours(
+            business,
+            startDate,
+            endDate
+         );
 
          if (!withinBusinessHours) {
-         return res.status(400).json({
+            return res.status(400).json({
             ok: false,
-            msg: "El turno está fuera del horario del negocio"
-         });
+            msg: "El turno está fuera del horario del negocio",
+            });
          }
 
-
-
-         // Validar horario laboral
          const isWithinHours = AppointmentController.isWithinWorkingHours(
             professionalDoc,
             startDate,
@@ -579,12 +500,11 @@ export class AppointmentController {
 
          if (!isWithinHours) {
             return res.status(400).json({
-               ok: false,
-               msg: "El turno está fuera del horario laboral del profesional",
+            ok: false,
+            msg: "El turno está fuera del horario laboral del profesional",
             });
          }
 
-         // Validar que no esté en vacaciones/licencia
          const isInTimeOff = AppointmentController.isInTimeOff(
             professionalDoc,
             startDate,
@@ -593,42 +513,47 @@ export class AppointmentController {
 
          if (isInTimeOff) {
             return res.status(400).json({
-               ok: false,
-               msg: "El profesional no está disponible en ese horario (licencia/vacaciones)",
+            ok: false,
+            msg: "El profesional no está disponible en ese horario (licencia/vacaciones)",
             });
          }
 
-         // ✅ Verificar solapado excluyendo este turno
          const exceeds = await AppointmentController.exceedsOverlapLimit({
+            businessId: businessIdFromToken, 
             professionalId: professionalDoc._id.toString(),
             serviceId: serviceDoc._id.toString(),
             start: startDate,
             end: endDate,
             allowOverlapProfessional: professionalDoc.allowOverlap ?? false,
             allowOverlapService: serviceDoc.allowOverlap ?? false,
-            maxConcurrentAppointments:
-               serviceDoc.maxConcurrentAppointments ?? 1,
+            maxConcurrentAppointments: serviceDoc.maxConcurrentAppointments ?? 1,
             excludeId: appointment._id.toString(),
          });
 
          if (exceeds) {
             return res.status(400).json({
-               ok: false,
-               msg: "El profesional ya alcanzó el máximo de turnos solapados para este servicio en ese horario",
+            ok: false,
+            msg: "El profesional ya alcanzó el máximo de turnos solapados para este servicio en ese horario",
             });
          }
 
-         // Forzamos business consistente
-         req.body.business = businessId;
-         req.body.start = startDate;
-         req.body.end = endDate;
-         req.body.service = serviceDoc._id;
-         req.body.professional = professionalDoc._id;
-         req.body.client = clientDoc._id;
+         const updateData: any = {
+            business: businessIdFromToken,
+            start: startDate,
+            end: endDate,
+            service: serviceDoc._id,
+            professional: professionalDoc._id,
+            client: clientDoc._id,
+         };
+         if (typeof req.body.notes === "string") updateData.notes = req.body.notes.trim();
+         if (req.body.notes === null || req.body.notes === "") updateData.notes = undefined;
 
-         const updated = await Appointment.findByIdAndUpdate(
-            req.params.id,
-            req.body,
+         if (req.body.source) updateData.source = req.body.source;
+         if (req.body.status) updateData.status = req.body.status;
+
+         const updated = await Appointment.findOneAndUpdate(
+            { _id: appointment._id, business: businessIdFromToken }, 
+            updateData,
             { new: true }
          );
 
@@ -639,58 +564,77 @@ export class AppointmentController {
          });
       } catch (error) {
          console.error(error);
-         return res.status(500).json({
-            ok: false,
-            msg: "Error al actualizar el turno",
-         });
+         return res.status(500).json({ ok: false, msg: "Error al actualizar el turno" });
       }
-   }
+      }
 
-   // DELETE /api/appointments/:id
+
+
    static async deleteAppointment(req: Request, res: Response) {
-      try {
-         await Appointment.findByIdAndDelete(req.params.id);
-
-         return res.json({
-            ok: true,
-            msg: "Turno eliminado",
-         });
-      } catch (error) {
-         console.error(error);
-         return res.status(500).json({
-            ok: false,
-            msg: "Error al eliminar el turno",
-         });
+   try {
+      if (!req.user) {
+         return res.status(401).json({ ok: false, msg: "No autenticado" });
       }
+
+      const filter: any = { _id: req.params.id };
+
+      if (req.user.role !== "SYS_ADMIN") {
+         if (!req.user.businessId) {
+         return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+         }
+         filter.business = req.user.businessId;
+      }
+
+      const appointment = await Appointment.findOneAndUpdate(
+         filter,
+         { status: "cancelled" },
+         { new: true }
+      );
+
+      if (!appointment) {
+         return res.status(404).json({ ok: false, msg: "Turno no encontrado" });
+      }
+
+      return res.json({
+         ok: true,
+         msg: "Turno cancelado (borrado lógico)",
+         appointment,
+      });
+   } catch (error) {
+      console.error(error);
+      return res.status(500).json({ ok: false, msg: "Error al cancelar el turno" });
+   }
    }
 
-   // PATCH /api/appointments/:id/cancel
+
    static async cancelAppointment(req: Request, res: Response) {
       try {
-         const appointment = await Appointment.findByIdAndUpdate(
-            req.params.id,
+         if (!req.user) return res.status(401).json({ ok: false, msg: "No autenticado" });
+
+         const filter: any = { _id: req.params.id };
+
+         if (req.user.role !== "SYS_ADMIN") {
+            if (!req.user.businessId) {
+            return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
+            }
+            filter.business = req.user.businessId;
+         }
+
+         const appointment = await Appointment.findOneAndUpdate(
+            filter,
             { status: "cancelled" },
             { new: true }
          );
 
          if (!appointment) {
-            return res.status(404).json({
-               ok: false,
-               msg: "Turno no encontrado",
-            });
+            return res.status(404).json({ ok: false, msg: "Turno no encontrado" });
          }
 
-         return res.json({
-            ok: true,
-            msg: "Turno cancelado",
-            appointment,
-         });
+         return res.json({ ok: true, msg: "Turno cancelado", appointment });
       } catch (error) {
          console.error(error);
-         return res.status(500).json({
-            ok: false,
-            msg: "Error al cancelar el turno",
-         });
+         return res.status(500).json({ ok: false, msg: "Error al cancelar el turno" });
       }
-   }
+      }
+
 }

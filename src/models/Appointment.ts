@@ -41,6 +41,10 @@ const appointmentSchema = new Schema<IAppointment>(
   { timestamps: true }
 );
 
+appointmentSchema.index({ business: 1, start: 1 });
+appointmentSchema.index({ business: 1, professional: 1, start: 1 });
+appointmentSchema.index({ business: 1, service: 1, start: 1 });
+
 export const Appointment: Model<IAppointment> =
   mongoose.models.Appointment ||
   mongoose.model<IAppointment>('Appointment', appointmentSchema);
