@@ -2,12 +2,18 @@ import { Router } from "express";
 import { body, param, query } from "express-validator";
 import { validateFields } from "../middlewares/validateFields";
 import { AppointmentController } from "../controllers/AppointmentController";
+import { requireBusinessScope } from "../middlewares/requireBusinessScope";
+import { requireAuth } from "../middlewares/requireAuth";
+import { requireRole } from "../middlewares/requireRole";
 
 const router = Router();
 
+router.use(requireAuth);
+router.use(requireBusinessScope);
 
 router.get(
     "/",
+    requireRole("SYS_ADMIN","OWNER","BADMIN","PROFESSIONAL"),
     query("businessId", "businessId debe ser un MongoId válido")
         .optional()
         .isMongoId(),
@@ -22,6 +28,7 @@ router.get(
 
 router.get(
     "/:id",
+    requireRole("SYS_ADMIN","OWNER","BADMIN","PROFESSIONAL"),
     param("id", "El id debe ser un MongoId válido").isMongoId(),
     validateFields,
     AppointmentController.getAppointmentById
@@ -30,6 +37,7 @@ router.get(
 // POST /api/appointments
 router.post(
     "/",
+    requireRole("SYS_ADMIN","OWNER","BADMIN"),
     body("service", "El service es obligatorio y debe ser un MongoId válido")
         .notEmpty()
         .isMongoId(),
@@ -62,6 +70,7 @@ router.post(
 
 router.put(
     "/:id",
+    requireRole("SYS_ADMIN","OWNER","BADMIN"),
     param("id", "El id debe ser un MongoId válido").isMongoId(),
     body("service", "El service debe ser un MongoId válido")
         .optional()
@@ -92,6 +101,7 @@ router.put(
 
 router.delete(
     "/:id",
+    requireRole("SYS_ADMIN","OWNER","BADMIN"),
     param("id", "El id debe ser un MongoId válido").isMongoId(),
     validateFields,
     AppointmentController.deleteAppointment
@@ -99,6 +109,7 @@ router.delete(
 
 router.patch(
     "/:id/cancel",
+    requireRole("SYS_ADMIN","OWNER","BADMIN"),
     param("id", "El id debe ser un MongoId válido").isMongoId(),
     validateFields,
     AppointmentController.cancelAppointment

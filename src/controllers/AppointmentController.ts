@@ -191,6 +191,7 @@ export class AppointmentController {
 
    static async getAllAppointments(req: Request, res: Response) {
       try {
+         console.log(req.user)
          if (!req.user) return res.status(401).json({ ok: false, msg: "No autenticado" });
 
          const { professionalId, from, to, businessId: businessIdFromQuery } = req.query as any;

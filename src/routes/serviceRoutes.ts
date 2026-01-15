@@ -24,9 +24,6 @@ router.get(
 router.post(
     '/',
     requireRole("SYS_ADMIN", "OWNER"),
-    body('business', 'El business es obligatorio')
-        .notEmpty()
-        .isMongoId(),
     body('name', 'El nombre es obligatorio')
         .notEmpty()
         .isString()
@@ -97,12 +94,22 @@ router.put(
     ServiceController.updateService
 );
 
-router.delete(
-    '/:id',
+router.patch(
+    '/:id/delete',
     requireRole("SYS_ADMIN", "OWNER"),
     param('id', 'El id debe ser un MongoId válido').isMongoId(),
     validateFields,
     ServiceController.deleteService
+);
+
+router.patch(
+    "/:id/activate",
+    requireAuth,
+    requireBusinessScope,
+    requireRole("SYS_ADMIN", "OWNER", "BADMIN"),
+    param("id", 'El id debe ser un MongoId válido').isMongoId(),
+    validateFields,
+    ServiceController.activateService
 );
 
 export default router;

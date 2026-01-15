@@ -84,7 +84,7 @@ export class ServiceController {
           return res.status(400).json({ ok: false, msg: "business es obligatorio para SYS_ADMIN" });
         }
       } else {
-        businessId = req.user.businessId; // por middleware existe
+        businessId = req.user.businessId; 
       }
 
       const business = await Business.findById(businessId);
@@ -173,6 +173,40 @@ export class ServiceController {
     } catch (error) {
       console.error(error);
       return res.status(500).json({ ok: false, msg: "Error al desactivar el servicio" });
+    }
+  }
+
+  static async activateService(req: Request, res: Response) {
+    try {
+      if (!req.user) {
+        return res.status(401).json({ ok: false, msg: "No autenticado" });
+      }
+
+      const filter: any = { _id: req.params.id };
+
+      // scope por business (salvo SYS_ADMIN)
+      if (req.user.role !== "SYS_ADMIN") {
+        filter.business = req.user.businessId;
+      }
+
+      const service = await Service.findOneAndUpdate(
+        filter,
+        { isActive: true },
+        { new: true }
+      );
+
+      if (!service) {
+        return res.status(404).json({ ok: false, msg: "Servicio no encontrado" });
+      }
+
+      return res.json({
+        ok: true,
+        msg: "Servicio activado",
+        service,
+      });
+    } catch (error) {
+      console.error(error);
+      return res.status(500).json({ ok: false, msg: "Error al activar el servicio" });
     }
   }
 
