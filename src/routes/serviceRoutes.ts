@@ -44,7 +44,7 @@ router.post(
         .isString()
         .trim(),
     body('color', 'El color debe ser un string')
-        .optional()
+        .notEmpty()
         .isString()
         .trim(),
     body('allowOverlap', 'allowOverlap debe ser booleano')
@@ -81,7 +81,7 @@ router.put(
         .isString()
         .trim(),
     body('color', 'El color debe ser un string')
-        .optional()
+        .notEmpty()
         .isString()
         .trim(),
     body('allowOverlap', 'allowOverlap debe ser booleano')
