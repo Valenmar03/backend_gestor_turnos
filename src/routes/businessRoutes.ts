@@ -15,6 +15,7 @@ router.get("/me", requireAuth, BusinessController.getMyBusiness);
 router.get(
     "/:id",
     requireAuth,
+    requireRole("SYS_ADMIN"),
     param("id", "El id debe ser un MongoId válido").isMongoId(),
     validateFields,
     requireBusinessScope,
