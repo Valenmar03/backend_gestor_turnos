@@ -7,7 +7,7 @@ export interface IService extends Document {
   durationMinutes: number;
   price: number;
   category?: string;
-  color?: string;
+  color: string;
   isActive: boolean;
   allowOverlap: boolean;
   maxConcurrentAppointments: number;
@@ -26,7 +26,7 @@ const serviceSchema = new Schema<IService>(
     durationMinutes: { type: Number, required: true, min: 5 },
     price: { type: Number, required: true, min: 0 },
     category: { type: String, trim: true },
-    color: { type: String, trim: true },
+    color: { type: String, required: true,  trim: true },
     isActive: { type: Boolean, default: true },
     allowOverlap: { type: Boolean, default: false },
     maxConcurrentAppointments: { type: Number, default: 1, min: 1 },
