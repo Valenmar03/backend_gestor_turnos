@@ -23,7 +23,7 @@ export class ProfessionalController {
 
       const professionals = await Professional.find({ business: businessId })
         .populate("services")
-        .populate("userId", "name email isActive role isBookable") // ✅ acá viene el nombre
+        .populate("userId", "name email isActive role isBookable") 
         .sort({ createdAt: -1 })
         .lean();
 
