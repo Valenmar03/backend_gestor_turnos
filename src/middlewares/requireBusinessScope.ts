@@ -5,6 +5,8 @@ export function requireBusinessScope(req: Request, res: Response, next: NextFunc
 
   if (req.user.role === "SYS_ADMIN") return next();
 
+  console.log(req.user)
+
   if (!req.user.businessId) {
     return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
   }

@@ -11,7 +11,7 @@ export const USER_ROLES = [
 export type UserRole = (typeof USER_ROLES)[number];
 
 export interface IUser extends Document {
-  business?: mongoose.Types.ObjectId;
+  businessId?: mongoose.Types.ObjectId;
 
   role: UserRole;
 
@@ -32,7 +32,7 @@ export interface IUser extends Document {
 /** ===== Schema ===== */
 const userSchema = new Schema<IUser>(
   {
-    business: {
+    businessId: {
       type: Schema.Types.ObjectId,
       ref: "Business",
       index: true,
@@ -89,8 +89,7 @@ const userSchema = new Schema<IUser>(
 
 
 userSchema.pre("validate", function () {
-  if (this.role !== "SYS_ADMIN" && !this.business) {
-    // Esto hace que falle la validación de Mongoose como corresponde
+  if (this.role !== "SYS_ADMIN" && !this.businessId) {
     this.invalidate(
       "businessId",
       "businessId es obligatorio para OWNER, BADMIN y PROFESSIONAL"

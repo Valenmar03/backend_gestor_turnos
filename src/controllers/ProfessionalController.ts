@@ -86,8 +86,8 @@ export class ProfessionalController {
         workingHours = [],
         timeOff = [],
         allowOverlap = false,
-        password, // opcional: si no viene => temp
-        businessId: businessIdFromBody, // solo SYS_ADMIN
+        password, 
+        businessId: businessIdFromBody, 
       } = req.body as {
         name?: string;
         email?: string;
@@ -124,7 +124,6 @@ export class ProfessionalController {
       const businessExists = await Business.exists({ _id: finalBusinessId });
       if (!businessExists) return res.status(404).json({ ok: false, msg: "No existe el negocio" });
 
-      // 2) validar services contra business (mismo criterio que en updateProfessional)
       let cleanServices: string[] = [];
       if (Array.isArray(services) && services.length > 0) {
         cleanServices = ProfessionalController.dedupeIds(services);
@@ -139,7 +138,6 @@ export class ProfessionalController {
         }
       }
 
-      // 3) crear User PROFESSIONAL
       const plainPassword = password?.trim() || generateTempPassword();
       const passwordHash = await hashPassword(plainPassword);
 
@@ -147,7 +145,7 @@ export class ProfessionalController {
         name: name.trim(),
         email: email.toLowerCase().trim(),
         role: "PROFESSIONAL",
-        business: finalBusinessId, 
+        businessId: finalBusinessId, 
         passwordHash,
         isActive: true,
         phone: phone.trim(),
@@ -180,7 +178,6 @@ export class ProfessionalController {
           tempPassword: password ? undefined : plainPassword,
         });
       } catch (err) {
-        // rollback manual del user si falla professional
         await User.deleteOne({ _id: user._id });
         throw err;
       }

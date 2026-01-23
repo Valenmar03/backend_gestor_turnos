@@ -101,7 +101,7 @@ export class UserController {
         name: name.trim(),
         email: email.toLowerCase().trim(),
         role,
-        business: finalBusinessId ?? undefined,
+        businessId: finalBusinessId ?? undefined,
         passwordHash,
         isBookable: typeof isBookable === "boolean" ? isBookable : true,
         isActive: true,
@@ -132,7 +132,7 @@ export class UserController {
           name: user.name,
           email: user.email,
           role: user.role,
-          businessId: user.business ?? null,
+          business: user.businessId ?? null,
           isActive: user.isActive,
           isBookable: user.isBookable,
           phone: user.phone,
@@ -196,7 +196,6 @@ export class UserController {
         return res.status(404).json({ ok: false, msg: "Usuario no encontrado" });
       }
 
-      // No permitir tocar SYS_ADMIN (salvo SYS_ADMIN, si querés, pero yo recomiendo bloquear igual)
       if (target.role === "SYS_ADMIN") {
         return res.status(403).json({ ok: false, msg: "No se puede modificar un SYS_ADMIN" });
       }
@@ -209,11 +208,10 @@ export class UserController {
         if (!requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
         }
-        if (!target.business || target.business.toString() !== requester.businessId) {
+        if (!target.businessId || target.businessId.toString() !== requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
         }
 
-        // Opcional: owner no puede desactivar a otro OWNER
         if (target.role === "OWNER") {
           return res.status(403).json({ ok: false, msg: "No podés modificar el estado de otro OWNER" });
         }
@@ -249,7 +247,7 @@ export class UserController {
           name: target.name,
           email: target.email,
           role: target.role,
-          businessId: target.business ?? null,
+          businessId: target.businessId ?? null,
           isActive: target.isActive,
         },
       });
@@ -297,7 +295,7 @@ export class UserController {
           return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
         }
 
-        if (!target.business || target.business.toString() !== requester.businessId) {
+        if (!target.businessId || target.businessId.toString() !== requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
         }
 
@@ -322,7 +320,7 @@ export class UserController {
           name: target.name,
           email: target.email,
           role: target.role,
-          businessId: target.business ?? null,
+          businessId: target.businessId ?? null,
           isActive: target.isActive,
         },
       });
