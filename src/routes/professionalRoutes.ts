@@ -8,21 +8,26 @@ import { requireRole } from "../middlewares/requireRole";
 
 const router = Router();
 
-router.get("/", requireAuth, requireBusinessScope, ProfessionalController.getAllProfessionals);
+router.use(requireAuth);
+router.use(requireBusinessScope);
+
+router.get("/",  ProfessionalController.getAllProfessionals);
 
 router.get(
   "/:id",
-  requireAuth,
-  requireBusinessScope,
   param("id", "El id debe ser un MongoId válido").isMongoId(),
   validateFields,
   ProfessionalController.getProfessionalById
 );
 
+router.post(
+  "/",
+  requireRole("SYS_ADMIN", "OWNER"),
+  ProfessionalController.createProfessional
+);
+
 router.put(
   "/:id",
-  requireAuth,
-  requireBusinessScope,
   requireRole("SYS_ADMIN", "OWNER"),
   param("id", "El id debe ser un MongoId válido").isMongoId(),
 
@@ -49,8 +54,6 @@ router.put(
 
 router.post(
   "/:id/add-service",
-  requireAuth,
-  requireBusinessScope,
   requireRole("SYS_ADMIN", "OWNER"),
   param("id", "El id del profesional debe ser un MongoId válido").isMongoId(),
   body("serviceId", "El serviceId es obligatorio y debe ser un MongoId válido").notEmpty().isMongoId(),
@@ -60,8 +63,6 @@ router.post(
 
 router.post(
   "/:id/timeoff",
-  requireAuth,
-  requireBusinessScope,
   requireRole("SYS_ADMIN", "OWNER"),
   param("id", "El id del profesional debe ser un MongoId válido").isMongoId(),
   body("start", "start es obligatorio y debe ser una fecha válida").notEmpty().isISO8601(),

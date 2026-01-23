@@ -1,13 +1,9 @@
 import type { Request, Response } from "express";
-import crypto from "crypto";
-import { User, hashPassword, USER_ROLES, type UserRole } from "../models/User";
+import { User, USER_ROLES, type UserRole } from "../models/User";
 import { Business } from "../models/Business";
 import { Appointment } from "../models/Appointment";
-import { Professional } from "../models/Professional";
+import { generateTempPassword, hashPassword } from "../utils";
 
-function generateTempPassword(length = 10) {
-  return crypto.randomBytes(16).toString("hex").slice(0, length);
-}
 
 export class UserController {
   static async createUser(req: Request, res: Response) {
@@ -22,7 +18,7 @@ export class UserController {
         name,
         email,
         role,
-        businessId: businessIdFromBody,
+        business: businessIdFromBody,
         password,
         isBookable,
         phone,
@@ -30,7 +26,7 @@ export class UserController {
         name?: string;
         email?: string;
         role?: UserRole;
-        businessId?: string;
+        business?: string;
         password?: string;
         isBookable?: boolean;
         phone?: string;
@@ -105,7 +101,7 @@ export class UserController {
         name: name.trim(),
         email: email.toLowerCase().trim(),
         role,
-        businessId: finalBusinessId ?? undefined,
+        business: finalBusinessId ?? undefined,
         passwordHash,
         isBookable: typeof isBookable === "boolean" ? isBookable : true,
         isActive: true,
@@ -128,24 +124,6 @@ export class UserController {
         }
       }
 
-      if ((role === "BADMIN" || role === "PROFESSIONAL") && finalBusinessId) {
-        await Professional.updateOne(
-          { userId: user._id },
-          {
-            $setOnInsert: {
-              business: finalBusinessId,
-              userId: user._id,
-              services: [],
-              workingHours: [],
-              timeOff: [],
-              isActive: true,
-              allowOverlap: false,
-            },
-          },
-          { upsert: true }
-        );
-      }
-
       return res.status(201).json({
         ok: true,
         msg: "Usuario creado",
@@ -154,7 +132,7 @@ export class UserController {
           name: user.name,
           email: user.email,
           role: user.role,
-          businessId: user.businessId ?? null,
+          businessId: user.business ?? null,
           isActive: user.isActive,
           isBookable: user.isBookable,
           phone: user.phone,
@@ -231,7 +209,7 @@ export class UserController {
         if (!requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
         }
-        if (!target.businessId || target.businessId.toString() !== requester.businessId) {
+        if (!target.business || target.business.toString() !== requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
         }
 
@@ -271,7 +249,7 @@ export class UserController {
           name: target.name,
           email: target.email,
           role: target.role,
-          businessId: target.businessId ?? null,
+          businessId: target.business ?? null,
           isActive: target.isActive,
         },
       });
@@ -319,7 +297,7 @@ export class UserController {
           return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
         }
 
-        if (!target.businessId || target.businessId.toString() !== requester.businessId) {
+        if (!target.business || target.business.toString() !== requester.businessId) {
           return res.status(403).json({ ok: false, msg: "Acceso fuera de tu negocio" });
         }
 
@@ -344,7 +322,7 @@ export class UserController {
           name: target.name,
           email: target.email,
           role: target.role,
-          businessId: target.businessId ?? null,
+          businessId: target.business ?? null,
           isActive: target.isActive,
         },
       });

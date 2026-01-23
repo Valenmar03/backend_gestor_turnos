@@ -46,12 +46,10 @@ const professionalSchema = new Schema<IProfessional>(
   {
     business: { type: Schema.Types.ObjectId, ref: "Business", required: true, index: true },
 
-    // ✅ 1 perfil por usuario
     userId: {
       type: Schema.Types.ObjectId,
       ref: "User",
       required: true,
-      unique: true,
       index: true,
     },
 
@@ -63,6 +61,8 @@ const professionalSchema = new Schema<IProfessional>(
   },
   { timestamps: true }
 );
+
+professionalSchema.index({ business: 1, userId: 1 }, { unique: true });
 
 export const Professional: Model<IProfessional> =
   mongoose.models.Professional ||

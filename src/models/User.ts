@@ -11,8 +11,7 @@ export const USER_ROLES = [
 export type UserRole = (typeof USER_ROLES)[number];
 
 export interface IUser extends Document {
-  // SYS_ADMIN no requiere business
-  businessId?: mongoose.Types.ObjectId;
+  business?: mongoose.Types.ObjectId;
 
   role: UserRole;
 
@@ -33,7 +32,7 @@ export interface IUser extends Document {
 /** ===== Schema ===== */
 const userSchema = new Schema<IUser>(
   {
-    businessId: {
+    business: {
       type: Schema.Types.ObjectId,
       ref: "Business",
       index: true,
@@ -90,7 +89,7 @@ const userSchema = new Schema<IUser>(
 
 
 userSchema.pre("validate", function () {
-  if (this.role !== "SYS_ADMIN" && !this.businessId) {
+  if (this.role !== "SYS_ADMIN" && !this.business) {
     // Esto hace que falle la validación de Mongoose como corresponde
     this.invalidate(
       "businessId",
@@ -105,10 +104,6 @@ userSchema.methods.comparePassword = async function (plain: string) {
   return bcrypt.compare(plain, this.passwordHash);
 };
 
-export async function hashPassword(plain: string) {
-  const salt = await bcrypt.genSalt(10);
-  return bcrypt.hash(plain, salt);
-}
 
 export const User: Model<IUser> =
   mongoose.models.User || mongoose.model<IUser>("User", userSchema);

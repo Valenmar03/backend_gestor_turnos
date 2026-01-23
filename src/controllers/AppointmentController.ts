@@ -191,7 +191,6 @@ export class AppointmentController {
 
    static async getAllAppointments(req: Request, res: Response) {
       try {
-         console.log(req.user)
          if (!req.user) return res.status(401).json({ ok: false, msg: "No autenticado" });
 
          const { professionalId, from, to, businessId: businessIdFromQuery } = req.query as any;
@@ -199,7 +198,10 @@ export class AppointmentController {
          const filter: any = {};
 
          if (req.user.role === "SYS_ADMIN") {
-            if (businessIdFromQuery) filter.business = businessIdFromQuery;
+            if (!businessIdFromQuery) {
+            return res.status(400).json({ ok: false, msg: "businessId es requerido para SYS_ADMIN" });
+            }
+            filter.business = businessIdFromQuery;
          } else {
             if (!req.user.businessId) {
             return res.status(403).json({ ok: false, msg: "Usuario sin negocio asignado" });
@@ -207,17 +209,33 @@ export class AppointmentController {
             filter.business = req.user.businessId;
          }
 
-         if (professionalId) filter.professional = professionalId;
-
          if (from || to) {
             filter.start = {};
             if (from) filter.start.$gte = new Date(from);
             if (to) filter.start.$lte = new Date(to);
          }
 
+         if (req.user.role === "PROFESSIONAL") {
+            const prof = await Professional.findOne({
+            business: filter.business,
+            userId: req.user.userId,
+            }).select("_id");
+
+            if (!prof) {
+            return res.status(403).json({ ok: false, msg: "No tenés perfil profesional asociado" });
+            }
+
+            filter.professional = prof._id;
+         } else {
+            if (professionalId) filter.professional = professionalId;
+         }
+
          const appointments = await Appointment.find(filter)
             .populate("service")
-            .populate("professional")
+            .populate({
+            path: "professional",
+            populate: { path: "userId", select: "name email phone" },
+            })
             .populate("client")
             .sort({ start: 1 });
 
@@ -226,8 +244,7 @@ export class AppointmentController {
          console.error(error);
          return res.status(500).json({ ok: false, msg: "Error al obtener los turnos" });
       }
-      }
-
+   }
 
    static async getAppointmentById(req: Request, res: Response) {
       try {
@@ -242,9 +259,25 @@ export class AppointmentController {
             filter.business = req.user.businessId;
          }
 
+         if (req.user.role === "PROFESSIONAL") {
+            const prof = await Professional.findOne({
+            business: req.user.businessId,
+            userId: req.user.userId,
+            }).select("_id");
+
+            if (!prof) {
+            return res.status(403).json({ ok: false, msg: "No tenés perfil profesional asociado" });
+            }
+
+            filter.professional = prof._id;
+         }
+
          const appointment = await Appointment.findOne(filter)
             .populate("service")
-            .populate("professional")
+            .populate({
+            path: "professional",
+            populate: { path: "userId", select: "name email phone" },
+            })
             .populate("client");
 
          if (!appointment) {
@@ -256,7 +289,9 @@ export class AppointmentController {
          console.error(error);
          return res.status(500).json({ ok: false, msg: "Error al obtener el turno" });
       }
-}
+   }
+
+
 
 
    static async createAppointment(req: Request, res: Response) {
